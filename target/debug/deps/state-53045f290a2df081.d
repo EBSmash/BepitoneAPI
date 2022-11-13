@@ -1,0 +1,12 @@
+C:\Users\elija\Documents\talon\BepitoneAPI\target\debug\deps\state-53045f290a2df081.rmeta: C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\lib.rs C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\ident_hash.rs C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\storage.rs C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\init.rs C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\shim.rs C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\container.rs
+
+C:\Users\elija\Documents\talon\BepitoneAPI\target\debug\deps\libstate-53045f290a2df081.rlib: C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\lib.rs C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\ident_hash.rs C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\storage.rs C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\init.rs C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\shim.rs C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\container.rs
+
+C:\Users\elija\Documents\talon\BepitoneAPI\target\debug\deps\state-53045f290a2df081.d: C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\lib.rs C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\ident_hash.rs C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\storage.rs C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\init.rs C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\shim.rs C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\container.rs
+
+C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\lib.rs:
+C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\ident_hash.rs:
+C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\storage.rs:
+C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\init.rs:
+C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\shim.rs:
+C:\Users\elija\.cargo\registry\src\github.com-1ecc6299db9ec823\state-0.5.3\src\container.rs:
