@@ -20,7 +20,7 @@ fn add() {
 #[get("/assign")]
 fn assign() -> String {
 
-    let file = File::open(format!("static/{}", ROW.lock().unwrap().len()));
+    let file = File::open(format!("static/partitions/{}", ROW.lock().unwrap().len()));
     let reader = BufReader::new(file.unwrap());
 
     let mut lines = String::new();

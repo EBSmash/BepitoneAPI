@@ -1,0 +1,5 @@
+target/*
+static/partitions/
+.idea/
+*.xml
+

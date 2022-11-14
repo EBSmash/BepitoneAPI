@@ -1,1 +1,1 @@
-C:\Users\elija\Documents\talon\BepitoneAPI\target\debug\BepitoneAPI.exe: C:\Users\elija\Documents\talon\BepitoneAPI\src\main.rs
+/Users/ebare/Documents/Bepitone/API/target/debug/BepitoneAPI: /Users/ebare/Documents/Bepitone/API/src/main.rs

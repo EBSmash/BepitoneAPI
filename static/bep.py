@@ -7,7 +7,7 @@ from PIL import ImageEnhance
 from IPython.display import display
 import numpy as np
 
-URL = "https://imgc.allpostersimages.com/img/posters/jacques70-world-map-black-on-white_u-L-PN13HF0.jpg"
+URL = "https://i.ibb.co/q1fNPXG/New-Piskel.png"
 response = requests.get(URL)
 img = Image.open(BytesIO(response.content))
  
