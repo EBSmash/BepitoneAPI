@@ -2,8 +2,8 @@
 
 use std::fmt::format;
 use std::fs;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufReader, Write};
 use std::ops::Deref;
 use std::sync::atomic::AtomicU64;
 use rocket::{Build, Rocket, State};
@@ -36,8 +36,35 @@ fn assign() -> String {
     return lines.to_string();
 }
 
+#[get("/broken/<id>/<x>/<z>")]
+fn broken(id:&str, x:i32, z:i32) {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open("static/broken.txt")
+        .unwrap();
+
+    if let Err(e) = writeln!(file, "{}", format!("{} {},{}", id, x,z)) {
+        eprintln!("Couldn't write to file: {}", e);
+    }
+}
+
+
+#[get("/failed/<id>/<layer_num>")]
+fn failed(id:&str, layer_num:i32) {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open("static/failed.txt")
+        .unwrap();
+
+    if let Err(e) = writeln!(file, "{}", layer_num.to_string())) {
+        eprintln!("Couldn't write to file: {}", e);
+    }
+}
+
 
 #[launch]
 fn rocket() -> _ {
-    rocket::build().mount("/", routes![assign])
+    rocket::build().mount("/", routes![assign, broken,failed])
 }
