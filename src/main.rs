@@ -18,7 +18,7 @@ static ROW: Lazy<Mutex<Vec<u8>>> = Lazy::new(|| Mutex::new(vec![]));
 
 static PLAYER_COUNT: Lazy<Mutex<Vec<u8>>> = Lazy::new(|| Mutex::new(vec![]));
 
-static PLAYER_INDEX:Lazy<Mutex<HashMap<i32, String>>>= Lazy::new(|| Mutex::new(HashMap::new()));
+static PLAYER_INDEX: Lazy<Mutex<HashMap<i32, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 static FAILED_LAYERS_EVEN: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(vec![]));
 static FAILED_LAYERS_ODD: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(vec![]));
@@ -27,33 +27,33 @@ fn add() {
     ROW.lock().unwrap().push(0);
 }
 
-fn next_layer(isEven:bool) {
+fn next_layer(isEven: bool) {
     // find next possible layer based on arguments and return the id of it (MUST CHECK IF THE THING HAS ALREADY BEEN DONE)
     // You can do this by having 2 global ints which increment by 2 each time they are selected (1 for even and 1 for odd)
 }
 
 #[get("/assign/<id>")]
 fn assign(id: i32) -> String {
-    let mut assignment:String = "0".to_string();
-    if PLAYER_INDEX.lock().unwrap()[&id].replace(".failed", "").parse::<i32>().unwrap() % 2 == 0 { // EVEN
+    let mut assignment = "0".to_string();
+    println!("{}",PLAYER_INDEX.lock().unwrap().get(&id).unwrap().replace(".failed", ""));
+    if PLAYER_INDEX.lock().unwrap().get(&id).unwrap().replace(".failed", "").parse::<i32>().unwrap() % 2 == 0 { // EVEN
         if FAILED_LAYERS_EVEN.lock().unwrap().len() != 0 {
-            assignment = FAILED_LAYERS_EVEN.lock().unwrap().get(0).unwrap().to_string();
+            let assignment = FAILED_LAYERS_EVEN.lock().unwrap().get(0).unwrap().to_string();
             FAILED_LAYERS_EVEN.lock().unwrap().remove(0);
         } else {// assign odd
-
         }
     } else { // ODD
         if FAILED_LAYERS_ODD.lock().unwrap().len() != 0 {
-            assignment = FAILED_LAYERS_ODD.lock().unwrap().get(0).unwrap().to_string();
+            let assignment = FAILED_LAYERS_ODD.lock().unwrap().get(0).unwrap().to_string();
             FAILED_LAYERS_ODD.lock().unwrap().remove(0);
         } else { //assign even
-
         }
     }
-    PLAYER_INDEX.lock().unwrap().get_mut(&id).map(|val| { *val = assignment; });
+
+    PLAYER_INDEX.lock().unwrap().get_mut(&id).map(|val| { let val = assignment.clone(); });
     //TODO FOLLOWING LINES ARE WE NEED WRITTEN HERE IN rUsT LANG
     /*
-    Check if Failed_layers.peek has anything in it && player(odd/even) is the same as Failed_Layers.peek(odd/even)
+    Check if Failed_layers.bep has anything in it && player(odd/even) is the same as Failed_Layers.bep(odd/even)
         if it does then take the file name from it and create the file object using that file name
         poll the queue (or whatever it is in rust)
         write new data to failed FILE log
@@ -64,7 +64,9 @@ fn assign(id: i32) -> String {
 
     TODO MOST OF WHAT IS WRITTEN ABOVE I JUST FINISHED WRITING SO DAS EPIC
      */
-    let file = File::open(format!("static/partitions/{}", assignment));
+
+
+    let file = File::open(format!("static/partitions/{}", &*assignment));
     let reader = BufReader::new(file.unwrap());
 
     let mut lines = String::new();
@@ -81,8 +83,8 @@ fn assign(id: i32) -> String {
 }
 
 #[get("/fail/<file_name>/<x>/<z>")]
-fn fail_file_gen(file_name: &str, x:i32,z:i32) {
-    let file = File::open(format!("static/partitions/{}",file_name));
+fn fail_file_gen(file_name: &str, x: i32, z: i32) {
+    let file = File::open(format!("static/partitions/{}", file_name));
 
     let reader = BufReader::new(file.unwrap());
 
@@ -94,7 +96,7 @@ fn fail_file_gen(file_name: &str, x:i32,z:i32) {
         let formatted_line = format!("{} {}", x, z);
         let line = line.unwrap().clone();
         lines.push(line.clone());
-        if line.clone().as_str().contains(formatted_line.as_str()){
+        if line.clone().as_str().contains(formatted_line.as_str()) {
             line_err = lines.len()
         }
     }
@@ -115,7 +117,7 @@ fn fail_file_gen(file_name: &str, x:i32,z:i32) {
         eprintln!("Couldn't write to file: {}", e);
     }
 
-    for lineNum in line_err-1..lines.len() {
+    for lineNum in line_err - 1..lines.len() {
         let current = lines.get(lineNum).unwrap();
 
         writeln!(file_out, "{}", current.to_string()).expect("failed to write");
@@ -154,7 +156,9 @@ fn broken(id: &str, x: i32, z: i32) {
 #[get("/start")]
 fn start() -> String {
     PLAYER_COUNT.lock().unwrap().push(0);
-    ROW.lock().unwrap().len().to_string()
+    let id = PLAYER_COUNT.lock().unwrap().len();
+    PLAYER_INDEX.lock().unwrap().insert(id as i32, id.to_string()); // to string is layer on first round
+    id.to_string()
 }
 
 #[get("/end")]
@@ -164,5 +168,5 @@ fn end() {
 
 #[launch]
 fn rocket() -> _ { // idk but this fixed shit
-    rocket::build().mount("/", routes![assign, broken, end, fail_file_gen])
+    rocket::build().mount("/", routes![assign, broken,start, end, fail_file_gen])
 }
