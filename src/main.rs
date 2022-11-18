@@ -9,22 +9,26 @@ use std::ops::{Deref, Index};
 use std::sync::atomic::AtomicU64;
 use rocket::{Build, Rocket, State};
 use once_cell::sync::Lazy;
-// 1.3.1
 use std::sync::Mutex;
 use rocket::form::validate::Contains;
 use std::collections::HashMap;
 
-static ROW: Lazy<Mutex<Vec<u8>>> = Lazy::new(|| Mutex::new(vec![]));
+static ROW_EVEN: Lazy<Mutex<Vec<u8>>> = Lazy::new(|| Mutex::new(vec![]));
+static ROW_ODD: Lazy<Mutex<Vec<u8>>> = Lazy::new(|| Mutex::new(vec![]));
 
 static PLAYER_COUNT: Lazy<Mutex<Vec<u8>>> = Lazy::new(|| Mutex::new(vec![]));
 
-static PLAYER_INDEX: Lazy<Mutex<HashMap<i32, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static PLAYER_INDEX: Lazy<Mutex<Vec<Player>>> = Lazy::new(|| Mutex::new(vec![]));
 
 static FAILED_LAYERS_EVEN: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(vec![]));
 static FAILED_LAYERS_ODD: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(vec![]));
 
-fn add() {
-    ROW.lock().unwrap().push(0);
+
+#[derive(Clone)]
+struct Player {
+    id: usize,
+    column: i32,
+    even: bool,
 }
 
 fn next_layer(isEven: bool) {
@@ -32,53 +36,49 @@ fn next_layer(isEven: bool) {
     // You can do this by having 2 global ints which increment by 2 each time they are selected (1 for even and 1 for odd)
 }
 
-#[get("/assign/<id>")]
-fn assign(id: i32) -> String {
-    let mut assignment = "0".to_string();
-    println!("{}",PLAYER_INDEX.lock().unwrap().get(&id).unwrap().replace(".failed", ""));
-    if PLAYER_INDEX.lock().unwrap().get(&id).unwrap().replace(".failed", "").parse::<i32>().unwrap() % 2 == 0 { // EVEN
-        if FAILED_LAYERS_EVEN.lock().unwrap().len() != 0 {
-            let assignment = FAILED_LAYERS_EVEN.lock().unwrap().get(0).unwrap().to_string();
-            FAILED_LAYERS_EVEN.lock().unwrap().remove(0);
-        } else {// assign odd
-        }
-    } else { // ODD
-        if FAILED_LAYERS_ODD.lock().unwrap().len() != 0 {
-            let assignment = FAILED_LAYERS_ODD.lock().unwrap().get(0).unwrap().to_string();
-            FAILED_LAYERS_ODD.lock().unwrap().remove(0);
-        } else { //assign even
-        }
-    }
-
-    PLAYER_INDEX.lock().unwrap().get_mut(&id).map(|val| { let val = assignment.clone(); });
-    //TODO FOLLOWING LINES ARE WE NEED WRITTEN HERE IN rUsT LANG
-    /*
-    Check if Failed_layers.bep has anything in it && player(odd/even) is the same as Failed_Layers.bep(odd/even)
-        if it does then take the file name from it and create the file object using that file name
-        poll the queue (or whatever it is in rust)
-        write new data to failed FILE log
-    else init normal file
-
-    At bottom of function remove the file that was read from the file list and write the new file list to the text log
-    ONLY DO THIS IF IT SENT A NORMAL (NOT FAILED) LAYER
-
-    TODO MOST OF WHAT IS WRITTEN ABOVE I JUST FINISHED WRITING SO DAS EPIC
-     */
-
-
-    let file = File::open(format!("static/partitions/{}", &*assignment));
-    let reader = BufReader::new(file.unwrap());
-
+#[get("/assign/<last_row>")]
+fn assign(last_row: usize) -> String {
     let mut lines = String::new();
+    let mut assignment = 69;
 
-    for line in reader.lines() {
-        lines.push_str(&*format!("{}{}", &*line.unwrap(), "\n"));
+    
+    if last_row % 2 == 0 { //even
+        ROW_EVEN.lock().unwrap().push(0);
+        ROW_EVEN.lock().unwrap().push(0);
+        assignment = ROW_EVEN.lock().unwrap().len();
+
+        if assignment % 2 == 0 {
+            assignment += 1;
+        }
+
+        let file = File::open(format!("static/partitions/{}", &*assignment.to_string()));
+        let reader = BufReader::new(file.unwrap());
+
+        for line in reader.lines() {
+            lines.push_str(&*format!("{}{}", &*line.unwrap(), "\n"));
+        }
+        println!("STARTING LAYER {}", assignment);
+
+    } else { //odd
+        ROW_ODD.lock().unwrap().push(0);
+        ROW_ODD.lock().unwrap().push(0);
+        assignment = ROW_ODD.lock().unwrap().len();
+
+        if assignment % 2 != 0 {
+            assignment += 1;
+        }
+
+        let file = File::open(format!("static/partitions/{}", &*assignment.to_string()));
+        let reader = BufReader::new(file.unwrap());
+
+        for line in reader.lines() {
+            lines.push_str(&*format!("{}{}", &*line.unwrap(), "\n"));
+        }
+        println!("STARTING LAYER {}", assignment);
+
+        return lines.to_string();
+
     }
-
-    add();
-
-    println!("STARTING LAYER {}", ROW.lock().unwrap().len());
-
     return lines.to_string();
 }
 
@@ -157,7 +157,6 @@ fn broken(id: &str, x: i32, z: i32) {
 fn start() -> String {
     PLAYER_COUNT.lock().unwrap().push(0);
     let id = PLAYER_COUNT.lock().unwrap().len();
-    PLAYER_INDEX.lock().unwrap().insert(id as i32, id.to_string()); // to string is layer on first round
     id.to_string()
 }
 
