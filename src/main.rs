@@ -1,25 +1,24 @@
 #[macro_use]
 extern crate rocket;
-// extern crate queues; TODO FIX WITH SMART STUFF
 
 use std::fmt::format;
 use std::fs;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
-use std::ops::Deref;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::ops::{Deref, Index};
 use std::sync::atomic::AtomicU64;
 use rocket::{Build, Rocket, State};
 use once_cell::sync::Lazy;
 // 1.3.1
 use std::sync::Mutex;
 use rocket::form::validate::Contains;
-use queues::*;
 
 static ROW: Lazy<Mutex<Vec<u8>>> = Lazy::new(|| Mutex::new(vec![]));
 
 static PLAYER_COUNT: Lazy<Mutex<Vec<u8>>> = Lazy::new(|| Mutex::new(vec![]));
 
-// static mut FAILED_LAYERS: Queue<i32> = queue![]; TODO do this but correctly
+static FAILED_LAYERS_EVEN: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(vec![]));
+static FAILED_LAYERS_ODD: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(vec![]));
 
 fn add() {
     ROW.lock().unwrap().push(0);
@@ -39,7 +38,7 @@ fn assign(id: i32) -> String {
     At bottom of function remove the file that was read from the file list and write the new file list to the text log
     ONLY DO THIS IF IT SENT A NORMAL (NOT FAILED) LAYER
      */
-
+    // if FAILED_LAYERS.lock().unwrap()
     let file = File::open(format!("static/partitions/{}", ROW.lock().unwrap().len()));
     let reader = BufReader::new(file.unwrap());
 
@@ -58,48 +57,67 @@ fn assign(id: i32) -> String {
 
 #[get("/fail/<file_name>/<x>/<z>")]
 fn fail_file_gen(file_name: &str, x:i32,z:i32) {
-    let file = File::open(file_name);
+    let file = File::open(format!("static/partitions/{}",file_name));
 
     let reader = BufReader::new(file.unwrap());
 
-    let mut lines = Vec::new();
+    let mut lines = vec![];
 
     let mut line_err = 0;
 
-    for line in reader.lines() {
-        lines.push(line.unwrap());
-        if line.unwrap().contains(&*format!("{} {}", x, z)) {
+    for mut line in reader.lines() {
+        let formatted_line = format!("{} {}", x, z);
+        let line = line.unwrap().clone();
+        lines.push(line.clone());
+        if line.clone().as_str().contains(formatted_line.as_str()){
             line_err = lines.len()
         }
     }
 
     if file_name.contains(".failed") {
         fs::rename(file_name, file_name.replace(".failed", "")).expect("TODO: panic message");
+        //delete file (see below)
     }
+    /*
+    RIGHT HERE WE NEED TO DOO STUFF
 
-    let file_out = OpenOptions::new()
+    in the above if statement delete any file named static/partitions/{file_name}.failed
+    then [OUTSIDE OF THE IF] create a new file called static/partitions/{}.failed and then create the file_out object with the same name
+     */
+
+    //create file (see above)
+    let mut file_out = OpenOptions::new() // TODO CREATE ZE FUCKING FILE BEFORE WE TRY TO WRITE TO IT
         .write(true)
         .append(true)
-        .open(format!("static/{}.failed", file_name))
+        .open(format!("static/partitions/{}.failed", file_name))
         .unwrap();
 
     if let Err(e) = write!(file_out, "{}.failed", format!("{}", lines.get(0).unwrap())) {
         eprintln!("Couldn't write to file: {}", e);
     }
 
-    for lineNum in line_err..lines.len() {
+    for lineNum in line_err-1..lines.len() {
         let current = lines.get(lineNum).unwrap();
 
         writeln!(file_out, "{}", current.to_string()).expect("failed to write");
         println!("{}", current);
     }
 
-    writeln!(file_out, "{}", lines.get(lines.len()).unwrap()).expect("failed to write");
-
     //TODO add file_name.failed to the QUEUE
+    if file_name.parse::<i32>().unwrap() % 2 == 0 {
+        FAILED_LAYERS_EVEN.lock().unwrap().push(format!("{}.failed", file_name));
+    } else {
+        FAILED_LAYERS_ODD.lock().unwrap().push(format!("{}.failed", file_name));
+    }
+    let mut failed_list = OpenOptions::new()
+        .write(true)
+        .read(false)
+        .append(true)
+        .open("static/failed_layers.bep")
+        .unwrap();
+    writeln!(failed_list, "{}.failed", file_name).expect("MEOWWWW");
     //TODO then copy the current QUEUE to the queue log text file
 }
-
 
 #[get("/broken/<id>/<x>/<z>")]
 fn broken(id: &str, x: i32, z: i32) {
