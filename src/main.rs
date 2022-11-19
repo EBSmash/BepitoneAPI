@@ -40,6 +40,10 @@ fn next_layer(isEven: bool) -> i32 {
     return out;
 }
 
+fn update_failed () {
+
+}
+
 #[get("/assign/<layer>")]
 fn assign(layer: i32) -> String {
     let mut assignment = "0".to_string();
@@ -54,6 +58,7 @@ fn assign(layer: i32) -> String {
         if FAILED_LAYERS_ODD.lock().unwrap().len() != 0 {
             assignment = FAILED_LAYERS_ODD.lock().unwrap().get(0).unwrap().to_string();
             FAILED_LAYERS_ODD.lock().unwrap().remove(0);
+            //TODO update the FAILED_LAYERS text file (maybe make function to do this?)
         } else { //assign even
             assignment = next_layer(true).to_string();
         }
@@ -91,7 +96,7 @@ fn fail_file_gen(file_name: &str, x: i32, z: i32) {
         fs::remove_file(format!("static/partitions/{}.failed", file_name)).expect("MEOWWWWW");
     }
     let create_file = File::create(format!("static/partitions/{}.failed", file_name)).expect("errr");
-    let mut file_out = OpenOptions::new() // TODO CREATE ZE FUCKING FILE BEFORE WE TRY TO WRITE TO IT
+    let mut file_out = OpenOptions::new()
         .write(true)
         .append(true)
         .open(format!("static/partitions/{}.failed", file_name))
@@ -112,12 +117,7 @@ fn fail_file_gen(file_name: &str, x: i32, z: i32) {
         writeln!(file_out, "{}", current.to_string()).expect("failed to write");
         println!("{}", current);
     }
-    //TODO add file_name.failed to the QUEUE
-    if file_name.parse::<i32>().unwrap() % 2 == 0 {
-        FAILED_LAYERS_EVEN.lock().unwrap().push(format!("{}.failed", file_name));
-    } else {
-        FAILED_LAYERS_ODD.lock().unwrap().push(format!("{}.failed", file_name));
-    }
+
     let mut failed_list = OpenOptions::new()
         .write(true)
         .read(false)
