@@ -29,7 +29,7 @@ fn next_layer(isEven: bool) -> i32 {
         COUNTERS.lock().unwrap()[1] += 2;
         out = COUNTERS.lock().unwrap()[1];
     }
-    let make_file = File::open(format!("static/iterators.bep"));
+    let make_file = File::create(format!("static/iterators.bep"));
     let mut iterators = OpenOptions::new()
         .write(true)
         .read(false)
