@@ -55,6 +55,7 @@ fn assign(layer: i32, user: &str) -> String {
         if FAILED_LAYERS_EVEN.lock().unwrap().len() != 0 {
             assignment = FAILED_LAYERS_EVEN.lock().unwrap().get(0).unwrap().to_string();
             FAILED_LAYERS_EVEN.lock().unwrap().remove(0);
+            fs::remove_file(format!("{}.failed", assignment));
         } else {// assign odd
             assignment = next_layer(false).to_string();
         }
@@ -62,6 +63,7 @@ fn assign(layer: i32, user: &str) -> String {
         if FAILED_LAYERS_ODD.lock().unwrap().len() != 0 {
             assignment = FAILED_LAYERS_ODD.lock().unwrap().get(0).unwrap().to_string();
             FAILED_LAYERS_ODD.lock().unwrap().remove(0);
+            fs::remove_file(format!("{}.failed", assignment));
             //TODO update the FAILED_LAYERS text file (maybe make function to do this?)
         } else { //assign even
             assignment = next_layer(true).to_string();
@@ -70,7 +72,9 @@ fn assign(layer: i32, user: &str) -> String {
 
     if DC_LAYERS.lock().unwrap().len() != 0 {
         if DC_LAYERS.lock().unwrap().contains_key(user) {
-            assignment = DC_LAYERS.lock().unwrap().get(user).unwrap().to_string()
+            assignment = DC_LAYERS.lock().unwrap().get(user).unwrap().to_string();
+            fs::remove_file(format!("{}.disconnected", assignment));
+            DC_LAYERS.lock().unwrap().remove(user);
         }
     }
 
@@ -112,7 +116,7 @@ fn fail_file_gen(file_name: &str, x: i32, z: i32) {
         .append(true)
         .open(format!("static/partitions/{}.failed", file_name))
         .unwrap();
-    if let Err(e) = write!(file_out, "{}.failed", format!("{}", lines.get(0).unwrap())) {
+    if let Err(e) = write!(file_out, "{}.failed\n", format!("{}", lines.get(0).unwrap())) {
         eprintln!("Couldn't write to file: {}", e);
     }
 
@@ -153,7 +157,7 @@ fn end() {
 }
 
 
-#[get("/dc/<file_name>/<x>/<z>/username")]
+#[get("/dc/<file_name>/<x>/<z>/<username>")]
 fn disconnect_file_gen(file_name: &str, x: i32, z: i32, username: &str) {
     let file = File::open(format!("static/partitions/{}", file_name));
 
@@ -170,8 +174,8 @@ fn disconnect_file_gen(file_name: &str, x: i32, z: i32, username: &str) {
         }
     }
     if file_name.contains(".failed") {
-        fs::rename(file_name, file_name.replace(".failed", "")).expect("TODO: panic message");
-        fs::remove_file(format!("static/partitions/{}.failed", file_name)).expect("MEOWWWWW");
+        fs::rename(file_name, file_name.replace(".disconnected", "")).expect("TODO: panic message");
+        fs::remove_file(format!("static/partitions/{}.disconnected", file_name)).expect("MEOWWWWW");
     }
     let _create_file = File::create(format!("static/partitions/{}.disconnected", file_name)).expect("errr");
     let mut file_out = OpenOptions::new()
@@ -179,23 +183,25 @@ fn disconnect_file_gen(file_name: &str, x: i32, z: i32, username: &str) {
         .append(true)
         .open(format!("static/partitions/{}.disconnected", file_name))
         .unwrap();
-    if let Err(e) = write!(file_out, "{}.failed", format!("{}", lines.get(0).unwrap())) {
+    if let Err(e) = write!(file_out, "{}.disconnected.{}\n", format!("{}", lines.get(0).unwrap()), username) {
         eprintln!("Couldn't write to file: {}", e);
     }
 
     DC_LAYERS.lock().unwrap().insert(username.to_string(), file_name.parse::<i32>().unwrap());
 
+    if lines.len() > 0 {
+        for lineNum in line_err..lines.len() {
+            let current = lines.get(lineNum).unwrap();
 
-    for lineNum in line_err - 1..lines.len() {
-        let current = lines.get(lineNum).unwrap();
-
-        writeln!(file_out, "{}", current.to_string()).expect("failed to write");
-        println!("{}", current);
+            writeln!(file_out, "{}", current.to_string()).expect("failed to write");
+            println!("{}", current);
+        }
     }
 }
 
 
 #[launch]
 fn rocket() -> _ { // idk but this fixed shit
+
     rocket::build().mount("/", routes![assign, start, end, fail_file_gen, disconnect_file_gen])
 }
