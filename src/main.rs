@@ -203,5 +203,19 @@ fn disconnect_file_gen(file_name: &str, x: i32, z: i32, username: &str) {
 #[launch]
 fn rocket() -> _ { // idk but this fixed shit
 
+
+    let file = File::open("static/partitions/iterators.bep");
+
+    let reader = BufReader::new(file.unwrap());
+
+    for line in reader.lines() {
+        if line.unwrap().parse::<i32>() {
+            for _ in 0..line.unwrap().parse::<i32>() {
+                COUNTERS.lock().unwrap().push(0)
+            }
+        }
+    }
+
     rocket::build().mount("/", routes![assign, start, end, fail_file_gen, disconnect_file_gen])
+
 }
