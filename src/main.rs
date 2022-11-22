@@ -1,18 +1,14 @@
 #[macro_use]
 extern crate rocket;
 
-use std::fmt::format;
 use std::fs;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Read, Write};
-use std::ops::{Deref, Index};
-use std::sync::atomic::AtomicU64;
+use std::io::{BufRead, BufReader, Write};
 use rocket::{Build, Rocket, State};
 use once_cell::sync::Lazy;
 // 1.3.1
 use std::sync::Mutex;
 use rocket::form::validate::Contains;
-use std::collections::HashMap;
 
 static COUNTERS: Lazy<Mutex<Vec<i32>>> = Lazy::new(|| Mutex::new(vec![-2, -1]));
 
@@ -142,8 +138,8 @@ fn fail_file_gen(file_name: &str, x: i32, y:i32, z: i32, name: String) {
             FAILED_LAYERS_ODD.lock().unwrap().push(format!("{}.failed", file_name));
         }
 
-        for lineNum in line_err - 1..lines.len() {
-            let current = lines.get(lineNum).unwrap();
+        for line_num in line_err - 1..lines.len() {
+            let current = lines.get(line_num).unwrap();
 
             writeln!(file_out, "{}", current.to_string()).expect("failed to write");
             println!("{}", current);
@@ -161,8 +157,8 @@ fn fail_file_gen(file_name: &str, x: i32, y:i32, z: i32, name: String) {
             eprintln!("Couldn't write to file: {}", e);
         }
         DISCONNECT_LAYERS.lock().unwrap().push(name.clone());
-        for lineNum in line_err - 1..lines.len() {
-            let current = lines.get(lineNum).unwrap();
+        for line_num in line_err - 1..lines.len() {
+            let current = lines.get(line_num).unwrap();
 
             writeln!(file_out, "{}", current.to_string()).expect("failed to write");
             println!("{}", current);
