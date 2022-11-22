@@ -103,6 +103,7 @@ fn assign(layer: i32, user: &str) -> String {
 
 #[get("/fail/<file_name>/<x>/<y>/<z>/<name>")]
 fn fail_file_gen(file_name: &str, x: i32, y:i32, z: i32, name: String) {
+    println!("{}", y);
     let file = File::open(format!("static/partitions/{}", file_name));
 
     let reader = BufReader::new(file.unwrap());
@@ -128,7 +129,7 @@ fn fail_file_gen(file_name: &str, x: i32, y:i32, z: i32, name: String) {
             .append(true)
             .open(format!("static/partitions/{}.failed", file_name))
             .unwrap();
-        if let Err(e) = write!(file_out, "{}", format!("{}", lines.get(0).unwrap())) {
+        if let Err(e) = writeln!(file_out, "{}", format!("{}", lines.get(0).unwrap())) {
             eprintln!("Couldn't write to file: {}", e);
         }
 
