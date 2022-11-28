@@ -25,6 +25,7 @@ def binarize(image_to_transform, threshold):
     # now, lets convert that image to a single greyscale image using convert()
     output_image=image_to_transform.convert("L")
 
+
     for x in range(output_image.width):
         f = open("{}".format(x) , "w")
         for y in range(output_image.height):
@@ -32,7 +33,11 @@ def binarize(image_to_transform, threshold):
             if output_image.getpixel((x,y))< threshold: #note that the first parameter is actually a tuple object
                 # lets set this to zero
                 output_image.putpixel( (x,y), 0 )
-                f.write("{} {}\n".format(x,y))
+                if x%5 == 0:
+                    f.write("{} {}\n".format(x,y))
+                else:
+                    f.write("{} {}#".format(x,y))
+
             else:
                 # otherwise lets set this to 255
                 output_image.putpixel( (x,y), 255 )
