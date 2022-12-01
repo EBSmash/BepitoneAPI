@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate rocket;
 
+use std::borrow::BorrowMut;
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
@@ -9,6 +10,7 @@ use once_cell::sync::Lazy;
 // 1.3.1
 use std::sync::Mutex;
 use rocket::form::validate::Contains;
+use std::collections::HashMap;
 
 static COUNTERS: Lazy<Mutex<Vec<i32>>> = Lazy::new(|| Mutex::new(vec![-2, -1]));
 
@@ -175,6 +177,35 @@ fn start() -> String {
     // PLAYER_INDEX.lock().unwrap().insert(id as i32, id.to_string()); // to string is layer on first round
     id.to_string()
 }
+fn update_leaderboard(map: &mut HashMap<String, i32>) {
+    fs::remove_file("static/leaderboard.bep").expect("ERRROR");
+    File::create("static/leaderboard.bep").expect("MEOW");
+    let mut file_out = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open("static/leaderboard.bep")
+        .unwrap();
+    for (key, value) in &*map {
+        writeln!(file_out, "{}", format!("{} {}", key.to_string(), value.to_string())).expect("DEWWWY");
+    }
+    map.clear();
+}
+#[get("/leaderboard/<user>/<iterator>")]
+fn leaderboard(user:String, iterator:i32) {
+    let mut leaderboard_buffer: HashMap<String, i32> = HashMap::new();
+    let file = File::open("static/leaderboard.bep");
+
+    let reader = BufReader::new(file.unwrap());
+    for line in reader.lines() {
+        leaderboard_buffer.insert(line.as_ref().unwrap().split(" ").collect::<Vec<&str>>()[0].to_string(), line.as_ref().unwrap().split(" ").collect::<Vec<&str>>()[1].parse::<i32>().expect("uwu"));
+    }
+    if leaderboard_buffer.contains_key(&user) {
+        leaderboard_buffer.insert(user.clone(), leaderboard_buffer.get(user.as_str()).unwrap() + iterator);
+    } else {
+        leaderboard_buffer.insert(user, iterator);
+    }
+    update_leaderboard(&mut(leaderboard_buffer));
+}
 
 #[get("/end")]
 fn end() {
@@ -189,11 +220,6 @@ fn rocket() -> _ { // idk but this fixed shit
     let reader = BufReader::new(file.unwrap());
     let mut iter = 0;
     for line in reader.lines() {
-        // if line.unwrap().parse::<i32>() {
-        //     for _ in 0..line.unwrap().parse::<i32>() {
-        //         COUNTERS.lock().unwrap().push(0)
-        //     }
-        // }
         COUNTERS.lock().unwrap()[iter] = line.unwrap().parse::<i32>().expect("owo");
         iter += 1;
     }
@@ -211,6 +237,6 @@ fn rocket() -> _ { // idk but this fixed shit
         }
     }
 
-    rocket::build().mount("/", routes![assign, start, end, fail_file_gen])
+    rocket::build().mount("/", routes![assign, start, end, fail_file_gen, leaderboard])
 
 }
