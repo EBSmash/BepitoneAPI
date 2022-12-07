@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate rocket;
 
-use std::borrow::BorrowMut;
+use std::borrow::{Borrow, BorrowMut};
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
@@ -21,6 +21,9 @@ static FAILED_LAYERS_ODD: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(vec
 
 static DISCONNECT_LAYERS: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(vec![]));
 
+static SCAN_COUNTERS: Lazy<Mutex<Vec<i32>>> = Lazy::new(|| Mutex::new(vec![-2, -1]));
+static FAILED_SCANS: Lazy<Mutex<HashMap<String, i32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
 fn next_layer(is_even: bool) -> i32 {
     let mut out: i32;
     if is_even {
@@ -38,8 +41,8 @@ fn next_layer(is_even: bool) -> i32 {
         .append(true)
         .open("static/iterators.bep")
         .unwrap();
-    writeln!(iterators, "{}", COUNTERS.lock().unwrap()[0].to_string());
-    writeln!(iterators, "{}", COUNTERS.lock().unwrap()[1].to_string());
+    writeln!(iterators, "{}", COUNTERS.lock().unwrap()[0].to_string()).expect("nothing at all");
+    writeln!(iterators, "{}", COUNTERS.lock().unwrap()[1].to_string()).expect("nothing at all");
 
     return out;
 }
@@ -62,6 +65,59 @@ fn update_failed() {
     for line in DISCONNECT_LAYERS.lock().unwrap().to_vec() {
         writeln!(failed_list,"{}",line).expect("awa");
     }
+}
+
+fn update_scan() {
+    fs::remove_file("static/scan_iterators.bep").expect("owo");
+    File::create("static/scan_iterators.bep").expect("owozers");
+    let mut scan_list: File = OpenOptions::new()
+        .write(true)
+        .read(false)
+        .append(true)
+        .open("static/scan_iterators.bep")
+        .unwrap();
+    for line in SCAN_COUNTERS.lock().unwrap().to_vec() {
+        writeln!(scan_list, "{}", line).expect("rawr");
+    }
+}
+
+fn update_scan_fail() {
+
+}
+
+#[get("/scanfail/<layer>/<user>")]
+fn scan_fail(layer: i32, user: &str) {
+    FAILED_SCANS.lock().unwrap().insert(user.to_string(), layer);
+}
+
+#[get("/scan/<last_scan>/<user>")]
+fn scan(last_scan: i32, user: String) -> String {
+    let mut assignment = "0".to_string();
+    if FAILED_SCANS.lock().unwrap().contains_key(&user) {
+        assignment = FAILED_SCANS.lock().unwrap().remove(&user).to_string();
+        update_scan_fail()
+    } else {
+        if last_scan % 2 == 0 { // even
+            SCAN_COUNTERS.lock().unwrap()[0] = SCAN_COUNTERS.lock().unwrap()[0] += 2;
+            assignment = SCAN_COUNTERS.lock().unwrap()[0].to_string();
+            update_scan()
+        } else if last_scan % 2 != 1 { // odd
+            SCAN_COUNTERS.lock().unwrap()[1] = SCAN_COUNTERS.lock().unwrap()[1] += 2;
+            assignment = SCAN_COUNTERS.lock().unwrap()[1].to_string();
+            update_scan()
+        } else {
+            return "DISABLE\n".to_string();
+        }
+    }
+    let file = File::open(format!("static/partitions/{}", &*assignment));
+    let reader = BufReader::new(file.unwrap());
+
+    let mut lines = String::new();
+    for line in reader.lines() {
+        lines.push_str(&*format!("{}{}", &*line.unwrap(), "\n"));
+    }
+    println!("STARTING LAYER {}", assignment);
+    return lines.to_string(); // todo don't send the whole file, completely unnecessary
 }
 
 #[get("/assign/<layer>/<user>")]
@@ -214,6 +270,13 @@ fn end() {
 
 #[launch]
 fn rocket() -> _ { // idk but this fixed shit
+    let file = File::open("static/scan_iterators.bep");
+    let reader = BufReader::new(file.unwrap());
+    let mut iter = 0;
+    for line in reader.lines() {
+        SCAN_COUNTERS.lock().unwrap()[iter] = line.unwrap().parse::<i32>().expect("meow");
+        iter += 1;
+    }
 
     let file = File::open("static/iterators.bep");
 
@@ -237,6 +300,6 @@ fn rocket() -> _ { // idk but this fixed shit
         }
     }
 
-    rocket::build().mount("/", routes![assign, start, end, fail_file_gen, leaderboard])
+    rocket::build().mount("/", routes![assign, start, end, fail_file_gen, leaderboard, scan, scan_fail])
 
 }
