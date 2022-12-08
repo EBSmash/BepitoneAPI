@@ -1,10 +1,14 @@
 [package]
-name = "BepitoneAPI"
+name = "bepitone_api"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[dependencies.rocket]
+version = "0.5.0-rc.2"
+features = ["json"]
+
 [dependencies]
-rocket = "0.5.0-rc.2"
 once_cell = "1.16.0"
+rusqlite = { version = "0.28.0", features = ["bundled"] }

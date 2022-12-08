@@ -1,242 +1,161 @@
+mod schema;
+
 #[macro_use]
 extern crate rocket;
 
-use std::borrow::BorrowMut;
-use std::fs;
-use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
-use rocket::{Build, Rocket, State};
-use once_cell::sync::Lazy;
+use rocket::{Config, State};
+use rocket::serde::{Serialize, json::Json};
 // 1.3.1
 use std::sync::Mutex;
-use rocket::form::validate::Contains;
-use std::collections::HashMap;
+use rusqlite::{Connection, named_params};
 
-static COUNTERS: Lazy<Mutex<Vec<i32>>> = Lazy::new(|| Mutex::new(vec![-2, -1]));
+struct BepitoneState {
+    db: Mutex<Connection>
+}
 
-static PLAYER_COUNT: Lazy<Mutex<Vec<u8>>> = Lazy::new(|| Mutex::new(vec![]));
+fn next_layer(con: &Connection, is_even: bool) -> i64 {
+    // min is the default value and the value used to for odd/even
+    let query = "
+        INSERT INTO layers(layer) SELECT COALESCE(MAX(layer) + 2, :min) FROM layers WHERE (layer % 2) = :min
+        RETURNING *;
+    ";
+    let mut statement = con.prepare(query).unwrap();
+    let arg = if is_even { 0 } else { 1 };
+    let mut rows = statement.query((":min", arg)).unwrap();
+    let row = rows.next().unwrap().unwrap();
+    return row.get_unwrap(0);
 
-static FAILED_LAYERS_EVEN: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(vec![]));
-static FAILED_LAYERS_ODD: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(vec![]));
+}
 
-static DISCONNECT_LAYERS: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(vec![]));
+fn get_layer_data(con: &Connection, layer: i64) -> String {
+    let query = "SELECT serialized FROM partitions WHERE layer = :layer";
+    let mut statement = con.prepare(query).unwrap();
+    let mut rows = statement.query((":layer", layer)).unwrap();
+    let row = rows.next().unwrap().unwrap();
+    return row.get_unwrap(0);
+}
 
-fn next_layer(is_even: bool) -> i32 {
-    let mut out: i32;
-    if is_even {
-        COUNTERS.lock().unwrap()[0] += 2;
-        out = COUNTERS.lock().unwrap()[0];
+fn assign_to_layer(con: &Connection, user: &str, layer: i64) {
+    let query = "INSERT INTO assignments VALUES (:username, :layer, 0) ON CONFLICT REPLACE";
+    let mut statement = con.prepare(query).unwrap();
+    statement.execute(named_params! {
+        ":username": user,
+        ":layer": layer
+    }).unwrap();
+}
+
+fn assign_to_next_layer(con: &mut Connection, user: &str, is_even: bool) -> i64 {
+    let tx = con.transaction().unwrap();
+    let layer = next_layer(&tx, is_even);
+    assign_to_layer(&tx, user, layer);
+    tx.commit().unwrap();
+    layer
+}
+
+fn get_existing_assignment(con: &Connection, user: &str) -> Option<i64> {
+    let query = "SELECT layer FROM assignments WHERE username = :username";
+    let mut statement = con.prepare(query).unwrap();
+    let mut rows = statement.query((":username", user)).unwrap();
+    if let Some(row) = rows.next().unwrap() {
+        let layer = row.get_unwrap(0);
+        Some(layer)
     } else {
-        COUNTERS.lock().unwrap()[1] += 2;
-        out = COUNTERS.lock().unwrap()[1];
-    }
-    fs::remove_file("static/iterators.bep").expect("haram");
-    File::create(format!("static/iterators.bep")).expect("halal");
-    let mut iterators = OpenOptions::new()
-        .write(true)
-        .read(false)
-        .append(true)
-        .open("static/iterators.bep")
-        .unwrap();
-    writeln!(iterators, "{}", COUNTERS.lock().unwrap()[0].to_string());
-    writeln!(iterators, "{}", COUNTERS.lock().unwrap()[1].to_string());
-
-    return out;
-}
-
-fn update_failed() {
-    fs::remove_file("static/failed_layers.bep").expect("reeeeee");
-    File::create("static/failed_layers.bep").expect("meow");
-    let mut failed_list = OpenOptions::new()
-        .write(true)
-        .read(false)
-        .append(true)
-        .open("static/failed_layers.bep")
-        .unwrap();
-    for line in FAILED_LAYERS_EVEN.lock().unwrap().to_vec() {
-        writeln!(failed_list,"{}", line).expect("uwu");
-    }
-    for line in FAILED_LAYERS_ODD.lock().unwrap().to_vec() {
-        writeln!(failed_list,"{}", line).expect("OWO");
-    }
-    for line in DISCONNECT_LAYERS.lock().unwrap().to_vec() {
-        writeln!(failed_list,"{}",line).expect("awa");
+        None
     }
 }
 
-#[get("/assign/<layer>/<user>")]
-fn assign(layer: i32, user: &str) -> String {
-    let mut assignment = "0".to_string();
-    if DISCONNECT_LAYERS.lock().unwrap().to_vec().contains(user.clone().to_string()) {
-        DISCONNECT_LAYERS.lock().unwrap().retain(|value| *value != user);
-        assignment = user.to_string();
+// restart means this user has just finished a layer
+#[get("/assign/<user>/<even_or_odd>/<restart>")]
+fn assign(state: &State<BepitoneState>, user: &str, even_or_odd: &str, restart: i32) -> Option<String> {
+    let is_even = match even_or_odd {
+        "even" => true,
+        "odd" => false,
+        _ => return None // 404
+    };
+
+    let mut con = state.db.lock().unwrap();
+
+    let layer = if restart == 1 {
+        assign_to_next_layer(&mut con, user, is_even)
     } else {
-        if layer % 2 == 0 { // EVEN
-            if FAILED_LAYERS_EVEN.lock().unwrap().len() != 0 {
-                assignment = FAILED_LAYERS_EVEN.lock().unwrap().get(0).unwrap().to_string();
-                FAILED_LAYERS_EVEN.lock().unwrap().remove(0);
-                // fs::remove_file(format!("{}.failed", assignment));
-            } else {// assign odd
-                assignment = next_layer(false).to_string();
-            }
-        } else { // ODD
-            if FAILED_LAYERS_ODD.lock().unwrap().len() != 0 {
-                assignment = FAILED_LAYERS_ODD.lock().unwrap().get(0).unwrap().to_string();
-                FAILED_LAYERS_ODD.lock().unwrap().remove(0);
-                // fs::remove_file(format!("{}.failed", assignment));
-                //TODO update the FAILED_LAYERS text file (maybe make function to do this?)
-            } else { //assign even
-                assignment = next_layer(true).to_string();
-            }
-        }
-    }
-    update_failed();
+        let existing = get_existing_assignment(&con, user);
+        let layer = existing.unwrap_or_else(|| assign_to_next_layer(&mut con, user, is_even));
+        layer
+    };
 
-    let file = File::open(format!("static/partitions/{}", &*assignment));
-    let reader = BufReader::new(file.unwrap());
-
-    let mut lines = String::new();
-    for line in reader.lines() {
-        lines.push_str(&*format!("{}{}", &*line.unwrap(), "\n"));
-    }
-    println!("STARTING LAYER {}", assignment);
-    return lines.to_string();
+    return Some(get_layer_data(&con, layer));
 }
 
-#[get("/fail/<file_name>/<x>/<y>/<z>/<name>")]
-fn fail_file_gen(file_name: &str, x: i32, y:i32, z: i32, name: String) {
-    println!("{}", y);
-    let file = File::open(format!("static/partitions/{}", file_name));
-
-    let reader = BufReader::new(file.unwrap());
-
-    let mut lines = vec![];
-    let mut line_err = 0;
-    for mut line in reader.lines() {
-        let formatted_line = format!("{} {}", x, z);
-        let line = line.unwrap().clone();
-        lines.push(line.clone());
-        if line.clone().as_str().contains(formatted_line.as_str()) {
-            line_err = lines.len()
-        }
-    }
-    if file_name.contains(".failed") {
-        fs::rename(file_name, file_name.replace(".failed", "")).expect("TODO: panic message");
-        fs::remove_file(format!("static/partitions/{}.failed", file_name)).expect("MEOWWWWW");
-    }
-    if y != 256 {
-        File::create(format!("static/partitions/{}.failed", file_name)).expect("errr");
-        let mut file_out = OpenOptions::new()
-            .write(true)
-            .append(true)
-            .open(format!("static/partitions/{}.failed", file_name))
-            .unwrap();
-        if let Err(e) = writeln!(file_out, "{}.failed", format!("{}", lines.get(0).unwrap())) {
-            eprintln!("Couldn't write to file: {}", e);
-        }
-
-        if file_name.parse::<i32>().unwrap() % 2 == 0 { //even
-            FAILED_LAYERS_EVEN.lock().unwrap().push(format!("{}.failed", file_name));
-        } else {
-            FAILED_LAYERS_ODD.lock().unwrap().push(format!("{}.failed", file_name));
-        }
-
-        for line_num in line_err - 1..lines.len() {
-            let current = lines.get(line_num).unwrap();
-
-            writeln!(file_out, "{}", current.to_string()).expect("failed to write");
-            println!("{}", current);
-        }
-        update_failed()
-        //TODO then copy the current QUEUE to the queue log text file
-    } else {
-        File::create(format!("static/partitions/{}", name)).expect("errr");
-        let mut file_out = OpenOptions::new()
-            .write(true)
-            .append(true)
-            .open(format!("static/partitions/{}", name))
-            .unwrap();
-        if let Err(e) = write!(file_out, "{}", format!("{}\n", file_name)) {
-            eprintln!("Couldn't write to file: {}", e);
-        }
-        DISCONNECT_LAYERS.lock().unwrap().push(name.clone());
-        for line_num in line_err - 1..lines.len() {
-            let current = lines.get(line_num).unwrap();
-
-            writeln!(file_out, "{}", current.to_string()).expect("failed to write");
-            println!("{}", current);
-        }
-        update_failed();
+#[put("/finish/<user>")]
+fn finish_layer(state: &State<BepitoneState>, user: &str) {
+    let query = "DELETE FROM assignments WHERE username = ?";
+    let con = state.db.lock().unwrap();
+    let mut statement = con.prepare(query).unwrap();
+    let result = statement.execute((1, user));
+    if !result.is_ok() {
+        panic!()
     }
 }
 
-#[get("/start")]
-fn start() -> String {
-    PLAYER_COUNT.lock().unwrap().push(0);
-    let id = PLAYER_COUNT.lock().unwrap().len();
-    // PLAYER_INDEX.lock().unwrap().insert(id as i32, id.to_string()); // to string is layer on first round
-    id.to_string()
-}
-fn update_leaderboard(map: &mut HashMap<String, i32>) {
-    fs::remove_file("static/leaderboard.bep").expect("ERRROR");
-    File::create("static/leaderboard.bep").expect("MEOW");
-    let mut file_out = OpenOptions::new()
-        .write(true)
-        .append(true)
-        .open("static/leaderboard.bep")
-        .unwrap();
-    for (key, value) in &*map {
-        writeln!(file_out, "{}", format!("{} {}", key.to_string(), value.to_string())).expect("DEWWWY");
+#[put("/leaderboard/<user>/<value>")]
+fn add_to_leaderboard(state: &State<BepitoneState>, user: String, value: i64) {
+    let query = "
+        INSERT INTO leaderboard (username, blocks_mined)
+        VALUES (:username, :blocks_mined)
+        ON CONFLICT (username)
+        DO UPDATE
+        SET blocks_mined = blocks_mined + :blocks_mined;
+    ";
+    let con = state.db.lock().unwrap();
+    let mut statement = con.prepare(query).unwrap();
+    let result = statement.execute(named_params! {
+        ":username": user,
+        ":blocks_mined": value
+    });
+    if !result.is_ok() {
+        panic!();
     }
-    map.clear();
-}
-#[get("/leaderboard/<user>/<iterator>")]
-fn leaderboard(user:String, iterator:i32) {
-    let mut leaderboard_buffer: HashMap<String, i32> = HashMap::new();
-    let file = File::open("static/leaderboard.bep");
-
-    let reader = BufReader::new(file.unwrap());
-    for line in reader.lines() {
-        leaderboard_buffer.insert(line.as_ref().unwrap().split(" ").collect::<Vec<&str>>()[0].to_string(), line.as_ref().unwrap().split(" ").collect::<Vec<&str>>()[1].parse::<i32>().expect("uwu"));
-    }
-    if leaderboard_buffer.contains_key(&user) {
-        leaderboard_buffer.insert(user.clone(), leaderboard_buffer.get(user.as_str()).unwrap() + iterator);
-    } else {
-        leaderboard_buffer.insert(user, iterator);
-    }
-    update_leaderboard(&mut(leaderboard_buffer));
 }
 
-#[get("/end")]
-fn end() {
-    PLAYER_COUNT.lock().unwrap().remove(0);
+#[derive(Serialize)]
+#[serde(crate = "rocket::serde")]
+struct LeaderboardEntry {
+    username: String,
+    blocks_mined: i64
+}
+
+#[get("/leaderboard")]
+fn leaderboard(state: &State<BepitoneState>) -> Json<Vec<LeaderboardEntry>> {
+    let query = "SELECT username, blocks_mined FROM leaderboard ORDER BY blocks_mined DESC";
+    let con = state.db.lock().unwrap();
+    let mut statement = con.prepare(query).unwrap();
+
+    let vec = statement.query_map([], |row| {
+        Ok(LeaderboardEntry {
+            username: row.get(0)?,
+            blocks_mined: row.get(1)?
+        })
+    })
+    .unwrap()
+    .map(|row| row.unwrap())
+    .collect();
+
+    return Json(vec);
 }
 
 #[launch]
 fn rocket() -> _ { // idk but this fixed shit
+    let connection = Connection::open("bepitone.db").expect("Failed to open sqlite database (bepitone.db)");
 
-    let file = File::open("static/iterators.bep");
+    schema::apply_schema(&connection);
 
-    let reader = BufReader::new(file.unwrap());
-    let mut iter = 0;
-    for line in reader.lines() {
-        COUNTERS.lock().unwrap()[iter] = line.unwrap().parse::<i32>().expect("owo");
-        iter += 1;
-    }
-    let file = File::open("static/failed_layers.bep");
-    let reader = BufReader::new(file.unwrap());
-    for line in reader.lines() {
-        if line.as_ref().unwrap().contains(".failed") {
-            if line.as_ref().unwrap().split(".").collect::<Vec<&str>>()[0].parse::<i32>().expect("meow") % 2 == 0 {
-                FAILED_LAYERS_EVEN.lock().unwrap().push(line.unwrap().to_string());
-            } else {
-                FAILED_LAYERS_ODD.lock().unwrap().push(line.unwrap().to_string());
-            }
-        } else {
-            DISCONNECT_LAYERS.lock().unwrap().push(line.unwrap().to_string());
-        }
-    }
-
-    rocket::build().mount("/", routes![assign, start, end, fail_file_gen, leaderboard])
-
+    let rocket = rocket::build()
+        .manage(BepitoneState {
+            db: Mutex::new(connection)
+        });
+    let figment = rocket.figment().clone()
+        .merge((Config::PORT, 6969));
+        //.merge((Config::ADDRESS, "0.0.0.0"));
+    rocket.configure(figment)
+        .mount("/", routes![assign, finish_layer, leaderboard, add_to_leaderboard])
 }
