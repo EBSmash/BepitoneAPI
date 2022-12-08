@@ -67,6 +67,20 @@ fn update_failed() {
     }
 }
 
+fn update_scan_fail(map: &mut HashMap<String, i32>) {
+    fs::remove_file("static/scan_fail.bep").expect("ERRROR");
+    File::create("static/scan_fail.bep").expect("MEOW");
+    let mut file_out = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open("static/scan_fail.bep")
+        .unwrap();
+    for (key, value) in &*map {
+        writeln!(file_out, "{}", format!("{} {}", key.to_string(), value.to_string())).expect("DEWWWY");
+    }
+    map.clear();
+}
+
 fn update_scan() {
     fs::remove_file("static/scan_iterators.bep").expect("owo");
     File::create("static/scan_iterators.bep").expect("owozers");
@@ -81,29 +95,29 @@ fn update_scan() {
     }
 }
 
-fn update_scan_fail() {
-
-}
-
 #[get("/scanfail/<layer>/<user>")]
 fn scan_fail(layer: i32, user: &str) {
+    if FAILED_SCANS.lock().unwrap().contains_key(user) {
+        FAILED_SCANS.lock().unwrap().remove(user);
+    }
     FAILED_SCANS.lock().unwrap().insert(user.to_string(), layer);
+    update_scan_fail(&mut(FAILED_SCANS.lock().unwrap()));
 }
 
 #[get("/scan/<last_scan>/<user>")]
 fn scan(last_scan: i32, user: String) -> String {
     let mut assignment = "0".to_string();
     if FAILED_SCANS.lock().unwrap().contains_key(&user) {
-        assignment = FAILED_SCANS.lock().unwrap().remove(&user).to_string();
-        update_scan_fail()
+        assignment = FAILED_SCANS.lock().unwrap().remove(&user).unwrap().to_string();
+        update_scan_fail(&mut(FAILED_SCANS.lock().unwrap()));
     } else {
         if last_scan % 2 == 0 { // even
-            SCAN_COUNTERS.lock().unwrap()[0] = SCAN_COUNTERS.lock().unwrap()[0] += 2;
-            assignment = SCAN_COUNTERS.lock().unwrap()[0].to_string();
+            SCAN_COUNTERS.lock().unwrap()[0] = SCAN_COUNTERS.lock().unwrap().get(0).unwrap() + 2;
+            assignment = SCAN_COUNTERS.lock().unwrap().get(0).unwrap().to_string();
             update_scan()
         } else if last_scan % 2 != 1 { // odd
-            SCAN_COUNTERS.lock().unwrap()[1] = SCAN_COUNTERS.lock().unwrap()[1] += 2;
-            assignment = SCAN_COUNTERS.lock().unwrap()[1].to_string();
+            SCAN_COUNTERS.lock().unwrap()[1] = SCAN_COUNTERS.lock().unwrap().get(1).unwrap() + 2;
+            assignment = SCAN_COUNTERS.lock().unwrap().get(1).unwrap().to_string();
             update_scan()
         } else {
             return "DISABLE\n".to_string();
@@ -120,18 +134,17 @@ fn scan(last_scan: i32, user: String) -> String {
     return lines.to_string(); // todo don't send the whole file, completely unnecessary
 }
 
-#[get("/assign/<layer>/<user>")]
-fn assign(layer: i32, user: &str) -> String {
+#[get("/assign/<layer>/<user>/<restart>")]
+fn assign(layer: i32, user: &str, restart: i8) -> String {
     let mut assignment = "0".to_string();
-    if DISCONNECT_LAYERS.lock().unwrap().to_vec().contains(user.clone().to_string()) {
-        DISCONNECT_LAYERS.lock().unwrap().retain(|value| *value != user);
+    if DISCONNECT_LAYERS.lock().unwrap().to_vec().contains(user.clone().to_string()) && restart == 1 {
         assignment = user.to_string();
     } else {
+        DISCONNECT_LAYERS.lock().unwrap().retain(|value| *value != user);
         if layer % 2 == 0 { // EVEN
             if FAILED_LAYERS_EVEN.lock().unwrap().len() != 0 {
                 assignment = FAILED_LAYERS_EVEN.lock().unwrap().get(0).unwrap().to_string();
                 FAILED_LAYERS_EVEN.lock().unwrap().remove(0);
-                // fs::remove_file(format!("{}.failed", assignment));
             } else {// assign odd
                 assignment = next_layer(false).to_string();
             }
@@ -139,7 +152,6 @@ fn assign(layer: i32, user: &str) -> String {
             if FAILED_LAYERS_ODD.lock().unwrap().len() != 0 {
                 assignment = FAILED_LAYERS_ODD.lock().unwrap().get(0).unwrap().to_string();
                 FAILED_LAYERS_ODD.lock().unwrap().remove(0);
-                // fs::remove_file(format!("{}.failed", assignment));
                 //TODO update the FAILED_LAYERS text file (maybe make function to do this?)
             } else { //assign even
                 assignment = next_layer(true).to_string();
@@ -215,14 +227,16 @@ fn fail_file_gen(file_name: &str, x: i32, y:i32, z: i32, name: String) {
         if let Err(e) = write!(file_out, "{}", format!("{}\n", file_name)) {
             eprintln!("Couldn't write to file: {}", e);
         }
-        DISCONNECT_LAYERS.lock().unwrap().push(name.clone());
+        if !DISCONNECT_LAYERS.lock().unwrap().contains(name.clone()) {
+            DISCONNECT_LAYERS.lock().unwrap().push(name.clone());
+            update_failed();
+        }
         for line_num in line_err - 1..lines.len() {
             let current = lines.get(line_num).unwrap();
 
             writeln!(file_out, "{}", current.to_string()).expect("failed to write");
             println!("{}", current);
         }
-        update_failed();
     }
 }
 
