@@ -72,7 +72,7 @@ struct SqlError {
 }
 impl SqlError {
     fn new(err: rusqlite::Error) -> Self {
-        SqlError { message: err.to_string() }
+        SqlError { message: format!("Sqlite Error: {}", err.to_string()) }
     }
 }
 
