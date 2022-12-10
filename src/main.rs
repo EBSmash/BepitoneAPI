@@ -87,7 +87,7 @@ fn assign(state: &State<BepitoneState>, user: &str, even_or_odd: &str, restart: 
 
     let mut con = state.db.lock().unwrap();
 
-    let layer = if restart == 1 {
+    let layer = (if restart == 1 {
         assign_to_next_layer(&mut con, user, is_even)
     } else {
         let existing = get_existing_assignment(&con, user);
@@ -96,8 +96,7 @@ fn assign(state: &State<BepitoneState>, user: &str, even_or_odd: &str, restart: 
             Ok(None) => assign_to_next_layer(&mut con, user, is_even),
             Err(err) => Err(err)
         }
-    };
-    let layer = layer.map_err(SqlError::new)?;
+    }).map_err(SqlError::new)?;
     let data = get_layer_data(&con, layer).map_err(SqlError::new)?;
     Ok(Some(data))
 }
@@ -157,7 +156,7 @@ fn leaderboard(state: &State<BepitoneState>) -> Result<Json<Vec<LeaderboardEntry
 }
 
 #[launch]
-fn rocket() -> _ { // idk but this fixed shit
+fn rocket() -> _ {
     let connection = Connection::open("bepitone.db").expect("Failed to open sqlite database (bepitone.db)");
 
     schema::apply_schema(&connection);

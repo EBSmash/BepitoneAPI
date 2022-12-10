@@ -9,7 +9,7 @@ pub fn apply_schema(con: &Connection) {
             FOREIGN KEY(layer) REFERENCES partitions(layer)
         );
         CREATE TABLE IF NOT EXISTS assignments (
-            username TEXT NOT NULL UNIQUE,
+            username TEXT PRIMARY KEY,
             layer INTEGER NOT NULL,
             last_update INTEGER NOT NULL,
             FOREIGN KEY(layer) REFERENCES layers(layer),
@@ -17,13 +17,13 @@ pub fn apply_schema(con: &Connection) {
         );
 
         CREATE TABLE IF NOT EXISTS leaderboard (
-            username TEXT NOT NULL UNIQUE,
+            username TEXT PRIMARY KEY,
             blocks_mined INTEGER NOT NULL DEFAULT 0
         );
-        CREATE INDEX IF NOT EXISTS leaderboard_by_blocks_mined ON leaderboard(blocks_mined DESC);
+        CREATE INDEX IF NOT EXISTS leaderboard_by_blocks ON leaderboard(blocks_mined DESC);
 
         CREATE TABLE IF NOT EXISTS partitions (
-            layer INTEGER PRIMARY KEY NOT NULL,
+            layer INTEGER PRIMARY KEY,
             serialized TEXT NOT NULL
         );
     ";
