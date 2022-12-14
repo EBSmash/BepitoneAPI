@@ -25,7 +25,6 @@ fn next_layer(con: &Connection, is_even: bool) -> rusqlite::Result<i64> {
     let mut rows = statement.query((":min", arg))?;
     let row = rows.next()?.ok_or(rusqlite::Error::QueryReturnedNoRows)?;
     return row.get(0);
-
 }
 
 fn get_layer_data(con: &Connection, layer: i64) -> rusqlite::Result<String> {
@@ -65,6 +64,32 @@ fn get_existing_assignment(con: &Connection, user: &str) -> rusqlite::Result<Opt
     }
 }
 
+fn set_layer_depth(con: &Connection, layer: i64, depth: i64) -> rusqlite::Result<()> {
+    let query = "UPDATE layers SET depth_mined = :depth WHERE layer = :layer";
+    let mut statement = con.prepare(query)?;
+    let result = statement.execute(named_params! {
+        ":depth": depth,
+        ":layer": layer
+    });
+    result.map(|_| ())
+}
+
+fn update_leaderboard(con: &Connection, user: &str, mined: i64) -> rusqlite::Result<()> {
+    let query = "
+        INSERT INTO leaderboard (username, blocks_mined)
+        VALUES (:username, :blocks_mined)
+        ON CONFLICT (username)
+        DO UPDATE
+        SET blocks_mined = blocks_mined + :blocks_mined;
+    ";
+    let mut statement = con.prepare(query)?;
+    let result = statement.execute(named_params! {
+        ":username": user,
+        ":blocks_mined": mined
+    });
+    result.map(|_| ())
+}
+
 #[derive(Responder)]
 #[response(status = 500, content_type = "text/plain")]
 struct SqlError {
@@ -76,9 +101,16 @@ impl SqlError {
     }
 }
 
+#[derive(Serialize)]
+#[serde(crate = "rocket::serde")]
+struct AssignResult {
+    depth_mined: i64,
+    serialized: String // cringe data lol
+}
+
 // restart means this user has just finished a layer
 #[get("/assign/<user>/<even_or_odd>/<restart>")]
-fn assign(state: &State<BepitoneState>, user: &str, even_or_odd: &str, restart: i32) -> Result<Option<String>, SqlError> {
+fn assign(state: &State<BepitoneState>, user: &str, even_or_odd: &str, restart: i32) -> Result<Option<Json<AssignResult>>, SqlError> {
     let is_even = match even_or_odd {
         "even" => true,
         "odd" => false,
@@ -98,7 +130,24 @@ fn assign(state: &State<BepitoneState>, user: &str, even_or_odd: &str, restart: 
         }
     }).map_err(SqlError::new)?;
     let data = get_layer_data(&con, layer).map_err(SqlError::new)?;
-    Ok(Some(data))
+    Ok(Some(Json(AssignResult{
+        depth_mined: 666, // TODO
+        serialized: data
+    })))
+}
+
+#[put("/update/<layer>/<depth>")]
+fn update_layer(state: &State<BepitoneState>, layer: i64, depth: i64) -> Result<(), SqlError> {
+    let con = state.db.lock().unwrap();
+    set_layer_depth(&con, layer, depth).map_err(SqlError::new)
+}
+
+// combined leaderboard/update endpoint because otherwise they would both always be called at the same time separately
+#[put("/update/<layer>/<depth>/<user>/<blocks>")]
+fn update_layer_and_leaderboard(state: &State<BepitoneState>, layer: i64, depth: i64, user: &str, blocks: i64) -> Result<(), SqlError> {
+    let con = state.db.lock().unwrap();
+    set_layer_depth(&con, layer, depth).map_err(SqlError::new)?;
+    update_leaderboard(&con, user, blocks).map_err(SqlError::new)
 }
 
 #[put("/finish/<user>")]
@@ -111,21 +160,9 @@ fn finish_layer(state: &State<BepitoneState>, user: &str) -> Result<(), SqlError
 }
 
 #[put("/leaderboard/<user>/<value>")]
-fn add_to_leaderboard(state: &State<BepitoneState>, user: String, value: i64) -> Result<(), SqlError> {
-    let query = "
-        INSERT INTO leaderboard (username, blocks_mined)
-        VALUES (:username, :blocks_mined)
-        ON CONFLICT (username)
-        DO UPDATE
-        SET blocks_mined = blocks_mined + :blocks_mined;
-    ";
+fn add_to_leaderboard(state: &State<BepitoneState>, user: &str, value: i64) -> Result<(), SqlError> {
     let con = state.db.lock().unwrap();
-    let mut statement = con.prepare(query).map_err(SqlError::new)?;
-    let result = statement.execute(named_params! {
-        ":username": user,
-        ":blocks_mined": value
-    });
-    result.map(|_| ()).map_err(SqlError::new)
+    update_leaderboard(&con, user, value).map_err(SqlError::new)
 }
 
 #[derive(Serialize)]
@@ -169,5 +206,5 @@ fn rocket() -> _ {
         .merge((Config::PORT, 6969));
         //.merge((Config::ADDRESS, "0.0.0.0"));
     rocket.configure(figment)
-        .mount("/", routes![assign, finish_layer, leaderboard, add_to_leaderboard])
+        .mount("/", routes![assign, update_layer, update_layer_and_leaderboard, finish_layer, leaderboard, add_to_leaderboard])
 }
