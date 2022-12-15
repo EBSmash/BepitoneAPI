@@ -22,21 +22,29 @@ fn next_layer(con: &Connection, is_even: bool) -> rusqlite::Result<i64> {
     ";
     let mut statement = con.prepare(query)?;
     let arg = if is_even { 0 } else { 1 };
-    let mut rows = statement.query((":min", arg))?;
+    let mut rows = statement.query(named_params! {
+        ":min": arg
+    })?;
     let row = rows.next()?.ok_or(rusqlite::Error::QueryReturnedNoRows)?;
     return row.get(0);
 }
 
-fn get_layer_data(con: &Connection, layer: i64) -> rusqlite::Result<String> {
-    let query = "SELECT serialized FROM partitions WHERE layer = :layer";
+fn get_layer_data(con: &Connection, layer: i64) -> rusqlite::Result<(i64, String)> {
+    let query = "
+        SELECT layers.depth_mined, partitions.serialized
+        FROM partitions
+        INNER JOIN layers ON partitions.layer = layers.layer
+        WHERE partitions.layer = :layer;
+    ";
     let mut statement = con.prepare(query)?;
-    let mut rows = statement.query((":layer", layer))?;
-    let row = rows.next()?.ok_or(rusqlite::Error::QueryReturnedNoRows)?;
-    return row.get(0);
+    let mut rows = statement.query_map(named_params! {
+        ":layer": layer
+    }, |row| Ok((row.get(0)?, row.get(1)?)))?;
+    rows.next().ok_or(rusqlite::Error::QueryReturnedNoRows)?
 }
 
 fn assign_to_layer(con: &Connection, user: &str, layer: i64) -> rusqlite::Result<()> {
-    let query = "INSERT INTO assignments VALUES (:username, :layer, 0) ON CONFLICT REPLACE";
+    let query = "INSERT OR REPLACE INTO assignments VALUES (:username, :layer, 0)";
     let mut statement = con.prepare(query)?;
     return statement.execute(named_params! {
         ":username": user,
@@ -55,7 +63,9 @@ fn assign_to_next_layer(con: &mut Connection, user: &str, is_even: bool) -> rusq
 fn get_existing_assignment(con: &Connection, user: &str) -> rusqlite::Result<Option<i64>> {
     let query = "SELECT layer FROM assignments WHERE username = :username";
     let mut statement = con.prepare(query)?;
-    let mut rows = statement.query((":username", user))?;
+    let mut rows = statement.query(named_params! {
+        ":username": user
+    })?;
     if let Some(row) = rows.next()? {
         let layer = row.get(0)?;
         Ok(Some(layer))
@@ -80,7 +90,7 @@ fn update_leaderboard(con: &Connection, user: &str, mined: i64) -> rusqlite::Res
         VALUES (:username, :blocks_mined)
         ON CONFLICT (username)
         DO UPDATE
-        SET blocks_mined = blocks_mined + :blocks_mined;
+        SET blocks_mined = blocks_mined + :blocks_mined
     ";
     let mut statement = con.prepare(query)?;
     let result = statement.execute(named_params! {
@@ -97,7 +107,7 @@ struct SqlError {
 }
 impl SqlError {
     fn new(err: rusqlite::Error) -> Self {
-        SqlError { message: format!("Sqlite Error: {}", err.to_string()) }
+        SqlError { message: format!("Sqlite Error: {}\n", err.to_string()) }
     }
 }
 
@@ -129,9 +139,9 @@ fn assign(state: &State<BepitoneState>, user: &str, even_or_odd: &str, restart: 
             Err(err) => Err(err)
         }
     }).map_err(SqlError::new)?;
-    let data = get_layer_data(&con, layer).map_err(SqlError::new)?;
+    let (depth, data) = get_layer_data(&con, layer).map_err(SqlError::new)?;
     Ok(Some(Json(AssignResult{
-        depth_mined: 666, // TODO
+        depth_mined: depth,
         serialized: data
     })))
 }
