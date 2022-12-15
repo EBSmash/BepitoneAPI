@@ -8,7 +8,7 @@ use rocket::serde::{Serialize, json::Json};
 // 1.3.1
 use std::sync::Mutex;
 use rocket::response::Responder;
-use rusqlite::{Connection, named_params};
+use rusqlite::{Connection, named_params, OptionalExtension, params};
 
 struct BepitoneState {
     db: Mutex<Connection>
@@ -20,13 +20,12 @@ fn next_layer(con: &Connection, is_even: bool) -> rusqlite::Result<i64> {
         INSERT INTO layers(layer) SELECT COALESCE(MAX(layer) + 2, :min) FROM layers WHERE (layer % 2) = :min
         RETURNING *;
     ";
-    let mut statement = con.prepare(query)?;
     let arg = if is_even { 0 } else { 1 };
-    let mut rows = statement.query(named_params! {
-        ":min": arg
-    })?;
-    let row = rows.next()?.ok_or(rusqlite::Error::QueryReturnedNoRows)?;
-    return row.get(0);
+    con.query_row(
+        query,
+        named_params! {":min": arg},
+        |row| row.get(0)
+    )
 }
 
 fn get_layer_data(con: &Connection, layer: i64) -> rusqlite::Result<(i64, String)> {
@@ -36,20 +35,18 @@ fn get_layer_data(con: &Connection, layer: i64) -> rusqlite::Result<(i64, String
         INNER JOIN layers ON partitions.layer = layers.layer
         WHERE partitions.layer = :layer;
     ";
-    let mut statement = con.prepare(query)?;
-    let mut rows = statement.query_map(named_params! {
-        ":layer": layer
-    }, |row| Ok((row.get(0)?, row.get(1)?)))?;
-    rows.next().ok_or(rusqlite::Error::QueryReturnedNoRows)?
+    con.query_row(
+        query,
+        named_params! {":layer": layer},
+        |row| Ok((row.get(0)?, row.get(1)?))
+    )
 }
 
 fn assign_to_layer(con: &Connection, user: &str, layer: i64) -> rusqlite::Result<()> {
-    let query = "INSERT OR REPLACE INTO assignments VALUES (:username, :layer, 0)";
-    let mut statement = con.prepare(query)?;
-    return statement.execute(named_params! {
+    con.execute("INSERT OR REPLACE INTO assignments VALUES (:username, :layer, 0)", named_params! {
         ":username": user,
         ":layer": layer
-    }).map(|_| ());
+    }).map(|_| ())
 }
 
 fn assign_to_next_layer(con: &mut Connection, user: &str, is_even: bool) -> rusqlite::Result<i64> {
@@ -62,26 +59,18 @@ fn assign_to_next_layer(con: &mut Connection, user: &str, is_even: bool) -> rusq
 
 fn get_existing_assignment(con: &Connection, user: &str) -> rusqlite::Result<Option<i64>> {
     let query = "SELECT layer FROM assignments WHERE username = :username";
-    let mut statement = con.prepare(query)?;
-    let mut rows = statement.query(named_params! {
-        ":username": user
-    })?;
-    if let Some(row) = rows.next()? {
-        let layer = row.get(0)?;
-        Ok(Some(layer))
-    } else {
-        Ok(None)
-    }
+    con.query_row(
+        query,
+        named_params! {":username": user},
+        |row| row.get(0)
+    ).optional()
 }
 
 fn set_layer_depth(con: &Connection, layer: i64, depth: i64) -> rusqlite::Result<()> {
-    let query = "UPDATE layers SET depth_mined = :depth WHERE layer = :layer";
-    let mut statement = con.prepare(query)?;
-    let result = statement.execute(named_params! {
+    con.execute("UPDATE layers SET depth_mined = :depth WHERE layer = :layer", named_params! {
         ":depth": depth,
         ":layer": layer
-    });
-    result.map(|_| ())
+    }).map(|_| ())
 }
 
 fn update_leaderboard(con: &Connection, user: &str, mined: i64) -> rusqlite::Result<()> {
@@ -92,12 +81,10 @@ fn update_leaderboard(con: &Connection, user: &str, mined: i64) -> rusqlite::Res
         DO UPDATE
         SET blocks_mined = blocks_mined + :blocks_mined
     ";
-    let mut statement = con.prepare(query)?;
-    let result = statement.execute(named_params! {
+    con.execute(query, named_params! {
         ":username": user,
         ":blocks_mined": mined
-    });
-    result.map(|_| ())
+    }).map(|_| ())
 }
 
 #[derive(Responder)]
@@ -164,8 +151,7 @@ fn update_layer_and_leaderboard(state: &State<BepitoneState>, layer: i64, depth:
 fn finish_layer(state: &State<BepitoneState>, user: &str) -> Result<(), SqlError> {
     let query = "DELETE FROM assignments WHERE username = ?";
     let con = state.db.lock().unwrap();
-    let mut statement = con.prepare(query).map_err(SqlError::new)?;
-    let result = statement.execute((1, user));
+    let result = con.execute(query, params![user]);
     result.map(|_| ()).map_err(SqlError::new)
 }
 
