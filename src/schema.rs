@@ -15,6 +15,12 @@ pub fn apply_schema(con: &Connection) {
             FOREIGN KEY(layer) REFERENCES layers(layer),
             FOREIGN KEY(layer) REFERENCES partitions(layer)
         );
+        CREATE TABLE IF NOT EXISTS min_layer (
+            id INTEGER PRIMARY KEY CHECK (id = 0),
+            even INTEGER NOT NULL,
+            odd INTEGER NOT NULL
+        );
+        INSERT OR IGNORE INTO min_layer(id,even,odd) VALUES(0, 0, 0);
 
         CREATE TABLE IF NOT EXISTS leaderboard (
             username TEXT PRIMARY KEY,

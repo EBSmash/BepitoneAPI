@@ -10,14 +10,11 @@ use std::sync::Mutex;
 use rocket::response::Responder;
 use rusqlite::{Connection, named_params, OptionalExtension, params};
 
-struct BepitoneState {
-    db: Mutex<Connection>
-}
-
 fn next_layer(con: &Connection, is_even: bool) -> rusqlite::Result<i64> {
     // min is the default value and the value used to for odd/even
     let query = "
-        INSERT INTO layers(layer) SELECT COALESCE(MAX(layer) + 2, :min) FROM layers WHERE (layer % 2) = :min
+        WITH min_config AS (SELECT (CASE WHEN :min = 0 then even else odd END) as min FROM min_layer)
+        INSERT INTO layers(layer) SELECT COALESCE(MAX(MAX(layer) + 2, (SELECT min FROM min_config)) + 2, (SELECT min FROM min_config)) FROM layers WHERE (layer % 2) = :min
         RETURNING *;
     ";
     let arg = if is_even { 0 } else { 1 };
@@ -107,14 +104,14 @@ struct AssignResult {
 
 // restart means this user has just finished a layer
 #[get("/assign/<user>/<even_or_odd>/<restart>")]
-fn assign(state: &State<BepitoneState>, user: &str, even_or_odd: &str, restart: i32) -> Result<Option<Json<AssignResult>>, SqlError> {
+fn assign(state: &State<Mutex<Connection>>, user: &str, even_or_odd: &str, restart: i32) -> Result<Option<Json<AssignResult>>, SqlError> {
     let is_even = match even_or_odd {
         "even" => true,
         "odd" => false,
         _ => return Ok(None) // 404
     };
 
-    let mut con = state.db.lock().unwrap();
+    let mut con = state.lock().unwrap();
 
     let layer = (if restart == 1 {
         assign_to_next_layer(&mut con, user, is_even)
@@ -134,30 +131,30 @@ fn assign(state: &State<BepitoneState>, user: &str, even_or_odd: &str, restart: 
 }
 
 #[put("/update/<layer>/<depth>")]
-fn update_layer(state: &State<BepitoneState>, layer: i64, depth: i64) -> Result<(), SqlError> {
-    let con = state.db.lock().unwrap();
+fn update_layer(state: &State<Mutex<Connection>>, layer: i64, depth: i64) -> Result<(), SqlError> {
+    let con = state.lock().unwrap();
     set_layer_depth(&con, layer, depth).map_err(SqlError::new)
 }
 
 // combined leaderboard/update endpoint because otherwise they would both always be called at the same time separately
 #[put("/update/<layer>/<depth>/<user>/<blocks>")]
-fn update_layer_and_leaderboard(state: &State<BepitoneState>, layer: i64, depth: i64, user: &str, blocks: i64) -> Result<(), SqlError> {
-    let con = state.db.lock().unwrap();
+fn update_layer_and_leaderboard(state: &State<Mutex<Connection>>, layer: i64, depth: i64, user: &str, blocks: i64) -> Result<(), SqlError> {
+    let con = state.lock().unwrap();
     set_layer_depth(&con, layer, depth).map_err(SqlError::new)?;
     update_leaderboard(&con, user, blocks).map_err(SqlError::new)
 }
 
 #[put("/finish/<user>")]
-fn finish_layer(state: &State<BepitoneState>, user: &str) -> Result<(), SqlError> {
+fn finish_layer(state: &State<Mutex<Connection>>, user: &str) -> Result<(), SqlError> {
     let query = "DELETE FROM assignments WHERE username = ?";
-    let con = state.db.lock().unwrap();
+    let con = state.lock().unwrap();
     let result = con.execute(query, params![user]);
     result.map(|_| ()).map_err(SqlError::new)
 }
 
 #[put("/leaderboard/<user>/<value>")]
-fn add_to_leaderboard(state: &State<BepitoneState>, user: &str, value: i64) -> Result<(), SqlError> {
-    let con = state.db.lock().unwrap();
+fn add_to_leaderboard(state: &State<Mutex<Connection>>, user: &str, value: i64) -> Result<(), SqlError> {
+    let con = state.lock().unwrap();
     update_leaderboard(&con, user, value).map_err(SqlError::new)
 }
 
@@ -169,9 +166,9 @@ struct LeaderboardEntry {
 }
 
 #[get("/leaderboard")]
-fn leaderboard(state: &State<BepitoneState>) -> Result<Json<Vec<LeaderboardEntry>>, SqlError> {
+fn leaderboard(state: &State<Mutex<Connection>>) -> Result<Json<Vec<LeaderboardEntry>>, SqlError> {
     let query = "SELECT username, blocks_mined FROM leaderboard ORDER BY blocks_mined DESC";
-    let con = state.db.lock().unwrap();
+    let con = state.lock().unwrap();
     let mut statement = con.prepare(query).map_err(SqlError::new)?;
 
     let rows = statement.query_map([], |row| {
@@ -195,9 +192,7 @@ fn rocket() -> _ {
     schema::apply_schema(&connection);
 
     let rocket = rocket::build()
-        .manage(BepitoneState {
-            db: Mutex::new(connection)
-        });
+        .manage(Mutex::new(connection));
     let figment = rocket.figment().clone()
         .merge((Config::PORT, 6969));
         //.merge((Config::ADDRESS, "0.0.0.0"));
