@@ -10,13 +10,13 @@ pub fn apply_schema(con: &Connection) {
         );
         CREATE TABLE IF NOT EXISTS assignments (
             username TEXT PRIMARY KEY,
-            layer INTEGER NOT NULL,
+            layer INTEGER NOT NULL UNIQUE,
             last_update INTEGER NOT NULL,
             FOREIGN KEY(layer) REFERENCES layers(layer),
             FOREIGN KEY(layer) REFERENCES partitions(layer)
         );
         CREATE TABLE IF NOT EXISTS min_layer (
-            id INTEGER PRIMARY KEY CHECK (id = 0),
+            id INTEGER PRIMARY KEY CHECK (id = 0), -- only 1 row
             even INTEGER NOT NULL,
             odd INTEGER NOT NULL
         );

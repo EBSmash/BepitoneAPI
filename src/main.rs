@@ -40,7 +40,7 @@ fn get_layer_data(con: &Connection, layer: i64) -> rusqlite::Result<(i64, String
 }
 
 fn assign_to_layer(con: &Connection, user: &str, layer: i64) -> rusqlite::Result<()> {
-    con.execute("INSERT OR REPLACE INTO assignments VALUES (:username, :layer, 0)", named_params! {
+    con.execute("INSERT OR REPLACE INTO assignments VALUES (:username, :layer, UNIXEPOCH())", named_params! {
         ":username": user,
         ":layer": layer
     }).map(|_| ())
@@ -64,10 +64,24 @@ fn get_existing_assignment(con: &Connection, user: &str) -> rusqlite::Result<Opt
 }
 
 fn set_layer_depth(con: &Connection, layer: i64, depth: i64) -> rusqlite::Result<()> {
-    con.execute("UPDATE layers SET depth_mined = :depth WHERE layer = :layer", named_params! {
+    let changed = con.execute("UPDATE layers SET depth_mined = :depth WHERE layer = :layer", named_params! {
         ":depth": depth,
         ":layer": layer
-    }).map(|_| ())
+    })?;
+    if changed < 1 {
+        return Err(rusqlite::Error::StatementChangedRows(0))
+    }
+    Ok(())
+}
+
+fn update_assignment(con: &Connection, user: &str) -> rusqlite::Result<()> {
+    let changed = con.execute("UPDATE assignments SET last_update = UNIXEPOCH() WHERE username = :user", named_params! {
+        ":user": user,
+    })?;
+    if changed < 1 {
+        return Err(rusqlite::Error::StatementChangedRows(0))
+    }
+    Ok(())
 }
 
 fn update_leaderboard(con: &Connection, user: &str, mined: i64) -> rusqlite::Result<()> {
@@ -93,6 +107,12 @@ impl SqlError {
     fn new(err: rusqlite::Error) -> Self {
         SqlError { message: format!("Sqlite Error: {}\n", err.to_string()) }
     }
+    fn with_msg(msg: &str, err: rusqlite::Error) -> Self {
+        SqlError { message: format!("{}\nSqlite Error: {}\n", msg, err.to_string()) }
+    }
+}
+fn err_with_msg(msg: &str) -> impl Fn(rusqlite::Error) -> SqlError + '_ {
+    |err| SqlError::with_msg(msg, err)
 }
 
 #[derive(Serialize)]
@@ -133,15 +153,18 @@ fn assign(state: &State<Mutex<Connection>>, user: &str, even_or_odd: &str, resta
 #[put("/update/<layer>/<depth>")]
 fn update_layer(state: &State<Mutex<Connection>>, layer: i64, depth: i64) -> Result<(), SqlError> {
     let con = state.lock().unwrap();
-    set_layer_depth(&con, layer, depth).map_err(SqlError::new)
+    set_layer_depth(&con, layer, depth).map_err(err_with_msg("set_layer_depth"))
 }
 
 // combined leaderboard/update endpoint because otherwise they would both always be called at the same time separately
 #[put("/update/<layer>/<depth>/<user>/<blocks>")]
 fn update_layer_and_leaderboard(state: &State<Mutex<Connection>>, layer: i64, depth: i64, user: &str, blocks: i64) -> Result<(), SqlError> {
-    let con = state.lock().unwrap();
-    set_layer_depth(&con, layer, depth).map_err(SqlError::new)?;
-    update_leaderboard(&con, user, blocks).map_err(SqlError::new)
+    let mut con = state.lock().unwrap();
+    let tx = con.transaction().map_err(SqlError::new)?;
+    set_layer_depth(&tx, layer, depth).map_err(err_with_msg("set_layer_depth"))?;
+    update_assignment(&tx, user).map_err(err_with_msg("update_assignment"))?;
+    update_leaderboard(&tx, user, blocks).map_err(err_with_msg("update_leaderboard"))?;
+    tx.commit().map_err(SqlError::new)
 }
 
 #[put("/finish/<user>")]
