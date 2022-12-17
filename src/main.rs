@@ -13,14 +13,14 @@ use rusqlite::{Connection, named_params, OptionalExtension, params, Transaction}
 fn next_layer(con: &Connection, is_even: bool) -> rusqlite::Result<i64> {
     // min is the default value and the value used to for odd/even
     let query = "
-        WITH min_config AS (SELECT (CASE WHEN :min = 0 then even else odd END) as min FROM min_layer)
-        INSERT INTO layers(layer) SELECT COALESCE(MAX(MAX(layer) + 2, (SELECT min FROM min_config)) + 2, (SELECT min FROM min_config)) FROM layers WHERE (layer % 2) = :min
+        WITH min_config AS (SELECT (CASE WHEN :parity = 0 then even else odd END) as min FROM min_layer)
+        INSERT INTO layers(layer) SELECT COALESCE(MAX(MAX(layer) + 2, (SELECT min FROM min_config)) + 2, (SELECT min FROM min_config)) FROM layers WHERE (layer % 2) = :parity
         RETURNING *;
     ";
-    let arg = if is_even { 0 } else { 1 };
+    let parity = if is_even { 0 } else { 1 };
     con.query_row(
         query,
-        named_params! {":min": arg},
+        named_params! {":parity": parity},
         |row| row.get(0)
     )
 }
@@ -111,12 +111,12 @@ impl From<rusqlite::Error> for SqlError {
         SqlError { message: format!("Sqlite Error: {}\n", err.to_string()) }
     }
 }
-trait Meow<T> {
-    fn meow(self) -> Result<T, SqlError>;
+trait ToSerializableSqlError<T> {
+    fn to_http(self) -> Result<T, SqlError>;
     fn with_msg(self, str: &str) -> Result<T, SqlError>;
 }
-impl<T> Meow<T> for Result<T, rusqlite::Error> {
-    fn meow(self) -> Result<T, SqlError> {
+impl<T> ToSerializableSqlError<T> for Result<T, rusqlite::Error> {
+    fn to_http(self) -> Result<T, SqlError> {
         self.map_err(SqlError::from)
     }
     fn with_msg(self, str: &str) -> Result<T, SqlError> {
@@ -143,18 +143,17 @@ fn assign(state: &State<Mutex<Connection>>, user: &str, even_or_odd: &str, resta
     };
 
     let mut con = state.lock().unwrap();
-    let tx = con.transaction().meow()?;
+    let tx = con.transaction()?;
 
-    let layer = (if restart == 1 {
-        assign_to_next_layer(&tx, user, is_even)
+    let layer = if restart == 1 {
+        assign_to_next_layer(&tx, user, is_even)?
     } else {
-        let existing = get_existing_assignment(&tx, user);
+        let existing = get_existing_assignment(&tx, user)?;
         match existing {
-            Ok(Some(layer)) => Ok(layer),
-            Ok(None) => assign_to_next_layer(&tx, user, is_even),
-            Err(err) => Err(err)
+            Some(layer) => layer,
+            None => assign_to_next_layer(&tx, user, is_even)?,
         }
-    }).meow()?;
+    };
     let (depth, data) = get_layer_data(&tx, layer).with_msg("No layer data")?;
     tx.commit()?;
 
@@ -183,11 +182,11 @@ fn update_layer(state: &State<Mutex<Connection>>, layer: i64, depth: i64) -> Res
 #[put("/update/<layer>/<depth>/<user>/<blocks>")]
 fn update_layer_and_leaderboard(state: &State<Mutex<Connection>>, layer: i64, depth: i64, user: &str, blocks: i64) -> Result<(), SqlError> {
     let mut con = state.lock().unwrap();
-    let tx = con.transaction().meow()?;
+    let tx = con.transaction()?;
     set_layer_depth(&tx, layer, depth).with_msg("set_layer_depth")?;
     update_assignment(&tx, user).with_msg("update_assignment")?;
     update_leaderboard(&tx, user, blocks).with_msg("update_leaderboard")?;
-    tx.commit().meow()
+    tx.commit().to_http()
 }
 
 #[put("/finish/<user>")]
@@ -195,13 +194,13 @@ fn finish_layer(state: &State<Mutex<Connection>>, user: &str) -> Result<(), SqlE
     let query = "DELETE FROM assignments WHERE username = ?";
     let con = state.lock().unwrap();
     let result = con.execute(query, params![user]);
-    result.map(|_| ()).meow()
+    result.map(|_| ()).to_http()
 }
 
 #[put("/leaderboard/<user>/<value>")]
 fn add_to_leaderboard(state: &State<Mutex<Connection>>, user: &str, value: i64) -> Result<(), SqlError> {
     let con = state.lock().unwrap();
-    update_leaderboard(&con, user, value).meow()
+    update_leaderboard(&con, user, value).to_http()
 }
 
 #[derive(Serialize)]
@@ -215,17 +214,17 @@ struct LeaderboardEntry {
 fn leaderboard(state: &State<Mutex<Connection>>) -> Result<Json<Vec<LeaderboardEntry>>, SqlError> {
     let query = "SELECT username, blocks_mined FROM leaderboard ORDER BY blocks_mined DESC";
     let con = state.lock().unwrap();
-    let mut statement = con.prepare(query).meow()?;
+    let mut statement = con.prepare(query)?;
 
     let rows = statement.query_map([], |row| {
         Ok(LeaderboardEntry {
             username: row.get(0)?,
             blocks_mined: row.get(1)?
         })
-    }).meow()?;
+    })?;
     let mut entries = Vec::new();
     for entry in rows {
-        entries.push(entry.meow()?);
+        entries.push(entry?);
     }
 
     return Ok(Json(entries));
