@@ -8,7 +8,7 @@ use rocket::serde::{Serialize, json::Json};
 // 1.3.1
 use std::sync::Mutex;
 use rocket::response::Responder;
-use rusqlite::{Connection, named_params, OptionalExtension, params};
+use rusqlite::{Connection, named_params, OptionalExtension, params, Transaction};
 
 fn next_layer(con: &Connection, is_even: bool) -> rusqlite::Result<i64> {
     // min is the default value and the value used to for odd/even
@@ -46,11 +46,9 @@ fn assign_to_layer(con: &Connection, user: &str, layer: i64) -> rusqlite::Result
     }).map(|_| ())
 }
 
-fn assign_to_next_layer(con: &mut Connection, user: &str, is_even: bool) -> rusqlite::Result<i64> {
-    let tx = con.transaction()?;
-    let layer = next_layer(&tx, is_even)?;
-    assign_to_layer(&tx, user, layer)?;
-    tx.commit()?;
+fn assign_to_next_layer(tx: &Transaction, user: &str, is_even: bool) -> rusqlite::Result<i64> {
+    let layer = next_layer(tx, is_even)?;
+    assign_to_layer(tx, user, layer)?;
     Ok(layer)
 }
 
@@ -104,21 +102,34 @@ struct SqlError {
     message: String
 }
 impl SqlError {
-    fn new(err: rusqlite::Error) -> Self {
-        SqlError { message: format!("Sqlite Error: {}\n", err.to_string()) }
-    }
     fn with_msg(msg: &str, err: rusqlite::Error) -> Self {
         SqlError { message: format!("{}\nSqlite Error: {}\n", msg, err.to_string()) }
     }
 }
-fn err_with_msg(msg: &str) -> impl Fn(rusqlite::Error) -> SqlError + '_ {
-    |err| SqlError::with_msg(msg, err)
+impl From<rusqlite::Error> for SqlError {
+    fn from(err: rusqlite::Error) -> Self {
+        SqlError { message: format!("Sqlite Error: {}\n", err.to_string()) }
+    }
 }
+trait Meow<T> {
+    fn meow(self) -> Result<T, SqlError>;
+    fn with_msg(self, str: &str) -> Result<T, SqlError>;
+}
+impl<T> Meow<T> for Result<T, rusqlite::Error> {
+    fn meow(self) -> Result<T, SqlError> {
+        self.map_err(SqlError::from)
+    }
+    fn with_msg(self, str: &str) -> Result<T, SqlError> {
+        self.map_err(|err| SqlError::with_msg(str, err))
+    }
+}
+
 
 #[derive(Serialize)]
 #[serde(crate = "rocket::serde")]
 struct AssignResult {
     depth_mined: i64,
+    layer: i64,
     serialized: String // cringe data lol
 }
 
@@ -132,20 +143,32 @@ fn assign(state: &State<Mutex<Connection>>, user: &str, even_or_odd: &str, resta
     };
 
     let mut con = state.lock().unwrap();
+    let tx = con.transaction().meow()?;
 
     let layer = (if restart == 1 {
-        assign_to_next_layer(&mut con, user, is_even)
+        assign_to_next_layer(&tx, user, is_even)
     } else {
-        let existing = get_existing_assignment(&con, user);
+        let existing = get_existing_assignment(&tx, user);
         match existing {
             Ok(Some(layer)) => Ok(layer),
-            Ok(None) => assign_to_next_layer(&mut con, user, is_even),
+            Ok(None) => assign_to_next_layer(&tx, user, is_even),
             Err(err) => Err(err)
         }
-    }).map_err(SqlError::new)?;
-    let (depth, data) = get_layer_data(&con, layer).map_err(SqlError::new)?;
+    }).meow()?;
+    let (depth, data) = get_layer_data(&tx, layer).with_msg("No layer data")?;
+    tx.commit()?;
+
+    let mut trimmed = String::new();
+    let mut lines = data.lines();
+    trimmed.push_str(lines.next().unwrap());
+    lines.skip(depth as usize).for_each(|l| {
+        trimmed.push_str(l);
+        trimmed.push('\n')
+    });
+
     Ok(Some(Json(AssignResult{
         depth_mined: depth,
+        layer,
         serialized: data
     })))
 }
@@ -153,18 +176,18 @@ fn assign(state: &State<Mutex<Connection>>, user: &str, even_or_odd: &str, resta
 #[put("/update/<layer>/<depth>")]
 fn update_layer(state: &State<Mutex<Connection>>, layer: i64, depth: i64) -> Result<(), SqlError> {
     let con = state.lock().unwrap();
-    set_layer_depth(&con, layer, depth).map_err(err_with_msg("set_layer_depth"))
+    set_layer_depth(&con, layer, depth).with_msg("set_layer_depth")
 }
 
 // combined leaderboard/update endpoint because otherwise they would both always be called at the same time separately
 #[put("/update/<layer>/<depth>/<user>/<blocks>")]
 fn update_layer_and_leaderboard(state: &State<Mutex<Connection>>, layer: i64, depth: i64, user: &str, blocks: i64) -> Result<(), SqlError> {
     let mut con = state.lock().unwrap();
-    let tx = con.transaction().map_err(SqlError::new)?;
-    set_layer_depth(&tx, layer, depth).map_err(err_with_msg("set_layer_depth"))?;
-    update_assignment(&tx, user).map_err(err_with_msg("update_assignment"))?;
-    update_leaderboard(&tx, user, blocks).map_err(err_with_msg("update_leaderboard"))?;
-    tx.commit().map_err(SqlError::new)
+    let tx = con.transaction().meow()?;
+    set_layer_depth(&tx, layer, depth).with_msg("set_layer_depth")?;
+    update_assignment(&tx, user).with_msg("update_assignment")?;
+    update_leaderboard(&tx, user, blocks).with_msg("update_leaderboard")?;
+    tx.commit().meow()
 }
 
 #[put("/finish/<user>")]
@@ -172,13 +195,13 @@ fn finish_layer(state: &State<Mutex<Connection>>, user: &str) -> Result<(), SqlE
     let query = "DELETE FROM assignments WHERE username = ?";
     let con = state.lock().unwrap();
     let result = con.execute(query, params![user]);
-    result.map(|_| ()).map_err(SqlError::new)
+    result.map(|_| ()).meow()
 }
 
 #[put("/leaderboard/<user>/<value>")]
 fn add_to_leaderboard(state: &State<Mutex<Connection>>, user: &str, value: i64) -> Result<(), SqlError> {
     let con = state.lock().unwrap();
-    update_leaderboard(&con, user, value).map_err(SqlError::new)
+    update_leaderboard(&con, user, value).meow()
 }
 
 #[derive(Serialize)]
@@ -192,17 +215,17 @@ struct LeaderboardEntry {
 fn leaderboard(state: &State<Mutex<Connection>>) -> Result<Json<Vec<LeaderboardEntry>>, SqlError> {
     let query = "SELECT username, blocks_mined FROM leaderboard ORDER BY blocks_mined DESC";
     let con = state.lock().unwrap();
-    let mut statement = con.prepare(query).map_err(SqlError::new)?;
+    let mut statement = con.prepare(query).meow()?;
 
     let rows = statement.query_map([], |row| {
         Ok(LeaderboardEntry {
             username: row.get(0)?,
             blocks_mined: row.get(1)?
         })
-    }).map_err(SqlError::new)?;
+    }).meow()?;
     let mut entries = Vec::new();
     for entry in rows {
-        entries.push(entry.map_err(SqlError::new)?);
+        entries.push(entry.meow()?);
     }
 
     return Ok(Json(entries));
