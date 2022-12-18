@@ -4,7 +4,7 @@ pub fn apply_schema(con: &Connection) {
     let query = "
         CREATE TABLE IF NOT EXISTS layers (
             layer INTEGER PRIMARY KEY,
-            depth_mined INTEGER NOT NULL DEFAULT 0,
+            depth_mined INTEGER DEFAULT 0,
             finished INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY(layer) REFERENCES partitions(layer)
         );
@@ -15,6 +15,8 @@ pub fn apply_schema(con: &Connection) {
             FOREIGN KEY(layer) REFERENCES layers(layer),
             FOREIGN KEY(layer) REFERENCES partitions(layer)
         );
+        CREATE INDEX IF NOT EXISTS assignments_by_layer ON assignments(layer);
+
         CREATE TABLE IF NOT EXISTS min_layer (
             id INTEGER PRIMARY KEY CHECK (id = 0), -- only 1 row
             even INTEGER NOT NULL,

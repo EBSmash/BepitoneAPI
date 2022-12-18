@@ -8,7 +8,7 @@ use rocket::serde::{Serialize, json::Json};
 // 1.3.1
 use std::sync::Mutex;
 use rocket::response::Responder;
-use rusqlite::{Connection, named_params, OptionalExtension, params, Transaction};
+use rusqlite::{Connection, named_params, params, Transaction};
 
 fn next_layer(con: &Connection, is_even: bool) -> rusqlite::Result<i64> {
     // min is the default value and the value used to for odd/even
@@ -25,7 +25,7 @@ fn next_layer(con: &Connection, is_even: bool) -> rusqlite::Result<i64> {
     )
 }
 
-fn get_layer_data(con: &Connection, layer: i64) -> rusqlite::Result<(i64, String)> {
+fn get_layer_data(con: &Connection, layer: i64) -> rusqlite::Result<(Option<i64>, String)> {
     let query = "
         SELECT layers.depth_mined, partitions.serialized
         FROM partitions
@@ -39,26 +39,48 @@ fn get_layer_data(con: &Connection, layer: i64) -> rusqlite::Result<(i64, String
     )
 }
 
-fn assign_to_layer(con: &Connection, user: &str, layer: i64) -> rusqlite::Result<()> {
-    con.execute("INSERT OR REPLACE INTO assignments VALUES (:username, :layer, UNIXEPOCH())", named_params! {
+// creates a new row or replaces that user's existing row
+// if a row for a different user exists but has the same layer, overwrite it and make it ours
+fn assign_to_layer(tx: &Transaction, user: &str, layer: i64) -> rusqlite::Result<()> {
+    tx.execute("DELETE FROM assignments WHERE layer = ?", params![layer]).map(|_| ())?;
+    tx.execute("INSERT OR REPLACE INTO assignments VALUES (:username, :layer, UNIXEPOCH())", named_params! {
         ":username": user,
-        ":layer": layer
+        ":layer": layer,
     }).map(|_| ())
 }
 
-fn assign_to_next_layer(tx: &Transaction, user: &str, is_even: bool) -> rusqlite::Result<i64> {
-    let layer = next_layer(tx, is_even)?;
-    assign_to_layer(tx, user, layer)?;
-    Ok(layer)
-}
+fn choose_existing_assignment(con: &Connection, user: &str, is_even: bool, restarting: bool) -> rusqlite::Result<Option<(String, i64)>> {
+    let query = "
+        SELECT username,layer
+        FROM (
+          SELECT * FROM assignments
+          WHERE username = :user
+          UNION
+          SELECT * FROM assignments
+          WHERE UNIXEPOCH() - last_update > 43200 -- 12 hours
+        )
+        ORDER BY IIF(username = :user, 0, 1), -- us first
+                 IIF(layer % 2 = :parity, 0, 1)
+        LIMIT 2
+    ";
 
-fn get_existing_assignment(con: &Connection, user: &str) -> rusqlite::Result<Option<i64>> {
-    let query = "SELECT layer FROM assignments WHERE username = :username";
-    con.query_row(
-        query,
-        named_params! {":username": user},
-        |row| row.get(0)
-    ).optional()
+    let mut statement = con.prepare(query)?;
+    let rows = statement.query_map(named_params! {
+        ":user": user,
+        ":parity": if is_even { 0 } else { 1 }
+    }, |row| {
+        Ok((row.get(0)?, row.get(1)?))
+    })?;
+
+    for row in rows {
+        let (name, layer) = row?;
+        match (restarting, name == user) {
+            (true, false) => return Ok(Some((name, layer))),
+            (false, true) => return Ok(Some((name, layer))),
+            _ => {}
+        };
+    }
+    Ok(None)
 }
 
 fn set_layer_depth(con: &Connection, layer: i64, depth: i64) -> rusqlite::Result<()> {
@@ -124,18 +146,9 @@ impl<T> ToSerializableSqlError<T> for Result<T, rusqlite::Error> {
     }
 }
 
-
-#[derive(Serialize)]
-#[serde(crate = "rocket::serde")]
-struct AssignResult {
-    depth_mined: i64,
-    layer: i64,
-    serialized: String // cringe data lol
-}
-
 // restart means this user has just finished a layer
 #[get("/assign/<user>/<even_or_odd>/<restart>")]
-fn assign(state: &State<Mutex<Connection>>, user: &str, even_or_odd: &str, restart: i32) -> Result<Option<Json<AssignResult>>, SqlError> {
+fn assign(state: &State<Mutex<Connection>>, user: &str, even_or_odd: &str, restart: i32) -> Result<Option<String>, SqlError> {
     let is_even = match even_or_odd {
         "even" => true,
         "odd" => false,
@@ -145,31 +158,30 @@ fn assign(state: &State<Mutex<Connection>>, user: &str, even_or_odd: &str, resta
     let mut con = state.lock().unwrap();
     let tx = con.transaction()?;
 
-    let layer = if restart == 1 {
-        assign_to_next_layer(&tx, user, is_even)?
-    } else {
-        let existing = get_existing_assignment(&tx, user)?;
-        match existing {
-            Some(layer) => layer,
-            None => assign_to_next_layer(&tx, user, is_even)?,
-        }
+    let existing = choose_existing_assignment(&tx, user, is_even, restart == 1)?;
+    let (prev_owner, layer) = match &existing {
+        Some((owner, layer)) => (Some(owner.as_str()), *layer),
+        None => (None, next_layer(&tx, is_even)?)
     };
+    assign_to_layer(&tx, user, layer)?;
     let (depth, data) = get_layer_data(&tx, layer).with_msg("No layer data")?;
     tx.commit()?;
 
-    let mut trimmed = String::new();
+    let mut trimmed = String::with_capacity(data.len());
     let mut lines = data.lines();
-    trimmed.push_str(lines.next().unwrap());
-    lines.skip(depth as usize).for_each(|l| {
+    let mut first_line = lines.next().unwrap().to_string();
+
+    // if we don't know the state of this layer, or the previous owner made some progress on it, consider it failed
+    if depth.is_none() || (depth.unwrap() > 0 && prev_owner.map_or(false, |owner| owner == user)) {
+        first_line.push_str(".failed");
+    }
+    trimmed.push_str(first_line.as_str()); // first line is the layer number (stupid tbh)
+    lines.skip(depth.unwrap_or(0) as usize).for_each(|l| {
         trimmed.push_str(l);
         trimmed.push('\n')
     });
 
-    Ok(Some(Json(AssignResult{
-        depth_mined: depth,
-        layer,
-        serialized: data
-    })))
+    Ok(Some(trimmed))
 }
 
 #[put("/update/<layer>/<depth>")]
