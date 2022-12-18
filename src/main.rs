@@ -75,8 +75,9 @@ fn choose_existing_assignment(con: &Connection, user: &str, is_even: bool, resta
     for row in rows {
         let (name, layer) = row?;
         match (restarting, name == user) {
-            (true, false) => return Ok(Some((name, layer))),
-            (false, true) => return Ok(Some((name, layer))),
+            // if restarting, select an assignment from a different user
+            // else choose whatever the query returns
+            (true, false) | (false, _) => return Ok(Some((name, layer))),
             _ => {}
         };
     }
@@ -172,7 +173,7 @@ fn assign(state: &State<Mutex<Connection>>, user: &str, even_or_odd: &str, resta
     let mut first_line = lines.next().unwrap().to_string();
 
     // if we don't know the state of this layer, or the previous owner made some progress on it, consider it failed
-    if depth.is_none() || (depth.unwrap() > 0 && prev_owner.map_or(false, |owner| owner == user)) {
+    if depth.is_none() || (depth.unwrap() > 0 && prev_owner == Some(user)) {
         first_line.push_str(".failed");
     }
     trimmed.push_str(first_line.as_str()); // first line is the layer number (stupid tbh)
