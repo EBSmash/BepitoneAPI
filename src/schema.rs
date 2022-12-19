@@ -1,7 +1,8 @@
+use indoc::indoc;
 use rusqlite::Connection;
 
 pub fn apply_schema(con: &Connection) {
-    let query = "
+    let query = indoc!{"
         CREATE TABLE IF NOT EXISTS layers (
             layer INTEGER PRIMARY KEY,
             depth_mined INTEGER DEFAULT 0,
@@ -34,6 +35,6 @@ pub fn apply_schema(con: &Connection) {
             layer INTEGER PRIMARY KEY,
             serialized TEXT NOT NULL
         );
-    ";
+    "};
     con.execute_batch(query).unwrap();
 }

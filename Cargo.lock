@@ -116,7 +116,7 @@ checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
 name = "bepitone_api"
 version = "0.1.0"
 dependencies = [
- "once_cell",
+ "indoc",
  "rocket",
  "rusqlite",
 ]
@@ -564,6 +564,12 @@ dependencies = [
  "hashbrown",
  "serde",
 ]
+
+[[package]]
+name = "indoc"
+version = "1.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da2d6f23ffea9d7e76c53eee25dfb67bcd8fde7f1198b0855350698c9f07c780"
 
 [[package]]
 name = "inlinable_string"

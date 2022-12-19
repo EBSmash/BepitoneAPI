@@ -9,14 +9,15 @@ use rocket::serde::{Serialize, json::Json};
 use std::sync::Mutex;
 use rocket::response::Responder;
 use rusqlite::{Connection, named_params, params, Transaction};
+use indoc::indoc;
 
 fn next_layer(con: &Connection, is_even: bool) -> rusqlite::Result<i64> {
     // min is the default value and the value used to for odd/even
-    let query = "
+    let query = indoc!{"
         WITH min_config AS (SELECT (CASE WHEN :parity = 0 then even else odd END) as min FROM min_layer)
         INSERT INTO layers(layer) SELECT COALESCE(MAX(MAX(layer) + 2, (SELECT min FROM min_config)) + 2, (SELECT min FROM min_config)) FROM layers WHERE (layer % 2) = :parity
         RETURNING *;
-    ";
+    "};
     let parity = if is_even { 0 } else { 1 };
     con.query_row(
         query,
@@ -26,12 +27,12 @@ fn next_layer(con: &Connection, is_even: bool) -> rusqlite::Result<i64> {
 }
 
 fn get_layer_data(con: &Connection, layer: i64) -> rusqlite::Result<(Option<i64>, String)> {
-    let query = "
+    let query = indoc!{"
         SELECT layers.depth_mined, partitions.serialized
         FROM partitions
         INNER JOIN layers ON partitions.layer = layers.layer
         WHERE partitions.layer = :layer;
-    ";
+    "};
     con.query_row(
         query,
         named_params! {":layer": layer},
@@ -50,7 +51,7 @@ fn assign_to_layer(tx: &Transaction, user: &str, layer: i64) -> rusqlite::Result
 }
 
 fn choose_existing_assignment(con: &Connection, user: &str, is_even: bool, restarting: bool) -> rusqlite::Result<Option<(String, i64)>> {
-    let query = "
+    let query = indoc!{"
         SELECT username,layer
         FROM (
           SELECT * FROM assignments
@@ -62,7 +63,7 @@ fn choose_existing_assignment(con: &Connection, user: &str, is_even: bool, resta
         ORDER BY IIF(username = :user, 0, 1), -- us first
                  IIF(layer % 2 = :parity, 0, 1)
         LIMIT 2
-    ";
+    "};
 
     let mut statement = con.prepare(query)?;
     let rows = statement.query_map(named_params! {
@@ -106,13 +107,13 @@ fn update_assignment(con: &Connection, user: &str) -> rusqlite::Result<()> {
 }
 
 fn update_leaderboard(con: &Connection, user: &str, mined: i64) -> rusqlite::Result<()> {
-    let query = "
+    let query = indoc!{"
         INSERT INTO leaderboard (username, blocks_mined)
         VALUES (:username, :blocks_mined)
         ON CONFLICT (username)
         DO UPDATE
         SET blocks_mined = blocks_mined + :blocks_mined
-    ";
+    "};
     con.execute(query, named_params! {
         ":username": user,
         ":blocks_mined": mined
