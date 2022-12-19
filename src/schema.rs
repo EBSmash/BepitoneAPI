@@ -35,5 +35,5 @@ pub fn apply_schema(con: &Connection) {
             serialized TEXT NOT NULL
         );
     ";
-    con.execute(query, ()).unwrap();
+    con.execute_batch(query).unwrap();
 }
