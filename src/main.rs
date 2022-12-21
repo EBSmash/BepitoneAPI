@@ -173,14 +173,14 @@ fn assign(state: &State<Mutex<Connection>>, user: &str, even_or_odd: &str) -> Re
     Ok(Some(trimmed))
 }
 
-#[put("/update/<layer>/<depth>")]
+#[post("/update/<layer>/<depth>")]
 fn update_layer(state: &State<Mutex<Connection>>, layer: i64, depth: i64) -> Result<(), SqlError> {
     let con = state.lock().unwrap();
     add_to_layer_depth(&con, layer, depth).with_msg("add_to_layer_depth")
 }
 
 // combined leaderboard/update endpoint because otherwise they would both always be called at the same time separately
-#[put("/update/<layer>/<depth>/<user>/<blocks>")]
+#[post("/update/<layer>/<depth>/<user>/<blocks>")]
 fn update_layer_and_leaderboard(state: &State<Mutex<Connection>>, layer: i64, depth: i64, user: &str, blocks: i64) -> Result<(), SqlError> {
     let mut con = state.lock().unwrap();
     let tx = con.transaction()?;
@@ -207,7 +207,7 @@ fn finish_layer(state: &State<Mutex<Connection>>, user: &str) -> Result<(), SqlE
     Ok(())
 }
 
-#[put("/leaderboard/<user>/<value>")]
+#[post("/leaderboard/<user>/<value>")]
 fn add_to_leaderboard(state: &State<Mutex<Connection>>, user: &str, value: i64) -> Result<(), SqlError> {
     let con = state.lock().unwrap();
     update_leaderboard(&con, user, value).to_http()
