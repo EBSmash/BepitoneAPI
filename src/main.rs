@@ -8,7 +8,7 @@ use rocket::serde::{Serialize, json::Json};
 // 1.3.1
 use std::sync::Mutex;
 use rocket::response::Responder;
-use rusqlite::{Connection, named_params, params, Transaction};
+use rusqlite::{Connection, named_params, OptionalExtension, params, Transaction};
 use indoc::indoc;
 
 fn next_layer(con: &Connection, is_even: bool) -> rusqlite::Result<i64> {
@@ -50,43 +50,30 @@ fn assign_to_layer(tx: &Transaction, user: &str, layer: i64) -> rusqlite::Result
     }).map(|_| ())
 }
 
-fn choose_existing_assignment(con: &Connection, user: &str, is_even: bool, restarting: bool) -> rusqlite::Result<Option<(String, i64)>> {
+fn choose_existing_assignment(con: &Connection, user: &str, is_even: bool) -> rusqlite::Result<Option<(String, i64)>> {
     let query = indoc!{"
         SELECT username,layer
-        FROM (
-          SELECT * FROM assignments
-          WHERE username = :user
-          UNION
-          SELECT * FROM assignments
-          WHERE UNIXEPOCH() - last_update > 43200 -- 12 hours
-        )
+        FROM assignments
+        JOIN layers ON ass.layer = layers.layer AND layers.finished = 0 -- only if the layer is unfinished
+        WHERE username = :user OR UNIXEPOCH() - last_update > 43200 -- 12 hours
         ORDER BY IIF(username = :user, 0, 1), -- us first
-                 IIF(layer % 2 = :parity, 0, 1)
-        LIMIT 2
+                 IIF(layer % 2 = :parity, 0, 1) -- prefer the same parity
+        LIMIT 1
     "};
-
-    let mut statement = con.prepare(query)?;
-    let rows = statement.query_map(named_params! {
-        ":user": user,
-        ":parity": if is_even { 0 } else { 1 }
-    }, |row| {
-        Ok((row.get(0)?, row.get(1)?))
-    })?;
-
-    for row in rows {
-        let (name, layer) = row?;
-        match (restarting, name == user) {
-            // if restarting, select an assignment from a different user
-            // else choose whatever the query returns
-            (true, false) | (false, _) => return Ok(Some((name, layer))),
-            _ => {}
-        };
-    }
-    Ok(None)
+    con.query_row(
+        query,
+        named_params! {
+            ":user": user,
+            ":parity": if is_even { 0 } else { 1 }
+        },
+        |row| Ok((row.get(0)?, row.get(1)?))
+    ).optional()
 }
 
-fn set_layer_depth(con: &Connection, layer: i64, depth: i64) -> rusqlite::Result<()> {
-    let changed = con.execute("UPDATE layers SET depth_mined = :depth WHERE layer = :layer", named_params! {
+// because we send truncated layer data, the client doesn't know the absolute depth it's mining at so we need to work in relative terms
+// (I don't think this is ideal)
+fn add_to_layer_depth(con: &Connection, layer: i64, depth: i64) -> rusqlite::Result<()> {
+    let changed = con.execute("UPDATE layers SET depth_mined = depth_mined + :depth WHERE layer = :layer", named_params! {
         ":depth": depth,
         ":layer": layer
     })?;
@@ -149,8 +136,8 @@ impl<T> ToSerializableSqlError<T> for Result<T, rusqlite::Error> {
 }
 
 // restart means this user has just finished a layer
-#[get("/assign/<user>/<even_or_odd>/<restart>")]
-fn assign(state: &State<Mutex<Connection>>, user: &str, even_or_odd: &str, restart: i32) -> Result<Option<String>, SqlError> {
+#[get("/assign/<user>/<even_or_odd>")]
+fn assign(state: &State<Mutex<Connection>>, user: &str, even_or_odd: &str) -> Result<Option<String>, SqlError> {
     let is_even = match even_or_odd {
         "even" => true,
         "odd" => false,
@@ -160,7 +147,7 @@ fn assign(state: &State<Mutex<Connection>>, user: &str, even_or_odd: &str, resta
     let mut con = state.lock().unwrap();
     let tx = con.transaction()?;
 
-    let existing = choose_existing_assignment(&tx, user, is_even, restart == 1)?;
+    let existing = choose_existing_assignment(&tx, user, is_even)?;
     let (prev_owner, layer) = match &existing {
         Some((owner, layer)) => (Some(owner.as_str()), *layer),
         None => (None, next_layer(&tx, is_even)?)
@@ -177,7 +164,7 @@ fn assign(state: &State<Mutex<Connection>>, user: &str, even_or_odd: &str, resta
     if depth.is_none() || (depth.unwrap() > 0 && prev_owner == Some(user)) {
         first_line.push_str(".failed");
     }
-    trimmed.push_str(first_line.as_str()); // first line is the layer number (stupid tbh)
+    trimmed.push_str(first_line.as_str());
     lines.skip(depth.unwrap_or(0) as usize).for_each(|l| {
         trimmed.push_str(l);
         trimmed.push('\n')
@@ -189,7 +176,7 @@ fn assign(state: &State<Mutex<Connection>>, user: &str, even_or_odd: &str, resta
 #[put("/update/<layer>/<depth>")]
 fn update_layer(state: &State<Mutex<Connection>>, layer: i64, depth: i64) -> Result<(), SqlError> {
     let con = state.lock().unwrap();
-    set_layer_depth(&con, layer, depth).with_msg("set_layer_depth")
+    add_to_layer_depth(&con, layer, depth).with_msg("add_to_layer_depth")
 }
 
 // combined leaderboard/update endpoint because otherwise they would both always be called at the same time separately
@@ -197,7 +184,7 @@ fn update_layer(state: &State<Mutex<Connection>>, layer: i64, depth: i64) -> Res
 fn update_layer_and_leaderboard(state: &State<Mutex<Connection>>, layer: i64, depth: i64, user: &str, blocks: i64) -> Result<(), SqlError> {
     let mut con = state.lock().unwrap();
     let tx = con.transaction()?;
-    set_layer_depth(&tx, layer, depth).with_msg("set_layer_depth")?;
+    add_to_layer_depth(&tx, layer, depth).with_msg("add_to_layer_depth")?;
     update_assignment(&tx, user).with_msg("update_assignment")?;
     update_leaderboard(&tx, user, blocks).with_msg("update_leaderboard")?;
     tx.commit().to_http()
@@ -205,10 +192,19 @@ fn update_layer_and_leaderboard(state: &State<Mutex<Connection>>, layer: i64, de
 
 #[put("/finish/<user>")]
 fn finish_layer(state: &State<Mutex<Connection>>, user: &str) -> Result<(), SqlError> {
-    let query = "DELETE FROM assignments WHERE username = ?";
-    let con = state.lock().unwrap();
-    let result = con.execute(query, params![user]);
-    result.map(|_| ()).to_http()
+    let delete = "DELETE FROM assignments WHERE username = ?";
+    let set_finished = indoc!{"
+        UPDATE layers
+        SET finished = 1
+        FROM assignments
+        WHERE layers.layer = assignments.layer AND assignments.username = ?
+    "};
+    let mut con = state.lock().unwrap();
+    let tx = con.transaction()?;
+    for query in [set_finished, delete] {
+        tx.execute(query, params![user]).map(|_| ())?
+    }
+    Ok(())
 }
 
 #[put("/leaderboard/<user>/<value>")]
