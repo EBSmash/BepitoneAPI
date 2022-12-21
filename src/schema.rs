@@ -6,7 +6,7 @@ pub fn apply_schema(con: &Connection) {
         CREATE TABLE IF NOT EXISTS layers (
             layer INTEGER PRIMARY KEY,
             depth_mined INTEGER DEFAULT 0,
-            finished INTEGER NOT NULL DEFAULT 0,
+            finished INTEGER NOT NULL DEFAULT 0 CHECK(finished = 0 OR finished = 1),
             FOREIGN KEY(layer) REFERENCES partitions(layer)
         );
         CREATE TABLE IF NOT EXISTS assignments (
