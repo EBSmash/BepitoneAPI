@@ -136,7 +136,7 @@ impl<T> ToSerializableSqlError<T> for Result<T, rusqlite::Error> {
 }
 
 // restart means this user has just finished a layer
-#[get("/assign/<user>/<even_or_odd>")]
+#[put("/assign/<user>/<even_or_odd>")]
 fn assign(state: &State<Mutex<Connection>>, user: &str, even_or_odd: &str) -> Result<Option<String>, SqlError> {
     let is_even = match even_or_odd {
         "even" => true,
