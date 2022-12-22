@@ -249,8 +249,8 @@ fn rocket() -> _ {
     let rocket = rocket::build()
         .manage(Mutex::new(connection));
     let figment = rocket.figment().clone()
-        .merge((Config::PORT, 6969));
-        //.merge((Config::ADDRESS, "0.0.0.0"));
+        .merge((Config::PORT, 80))
+        .merge((Config::ADDRESS, "0.0.0.0"));
     rocket.configure(figment)
         .mount("/", routes![assign, update_layer, update_layer_and_leaderboard, finish_layer, leaderboard, add_to_leaderboard])
 }
