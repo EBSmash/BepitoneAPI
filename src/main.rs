@@ -52,12 +52,12 @@ fn assign_to_layer(tx: &Transaction, user: &str, layer: i64) -> rusqlite::Result
 
 fn choose_existing_assignment(con: &Connection, user: &str, is_even: bool) -> rusqlite::Result<Option<(String, i64)>> {
     let query = indoc!{"
-        SELECT username,layer
+        SELECT username,assignments.layer
         FROM assignments
-        JOIN layers ON ass.layer = layers.layer AND layers.finished = 0 -- only if the layer is unfinished
+        JOIN layers ON assignments.layer = layers.layer AND layers.finished = 0 -- only if the layer is unfinished
         WHERE username = :user OR UNIXEPOCH() - last_update > 43200 -- 12 hours
         ORDER BY IIF(username = :user, 0, 1), -- us first
-                 IIF(layer % 2 = :parity, 0, 1) -- prefer the same parity
+                 IIF(assignments.layer % 2 = :parity, 0, 1) -- prefer the same parity
         LIMIT 1
     "};
     con.query_row(
@@ -249,8 +249,8 @@ fn rocket() -> _ {
     let rocket = rocket::build()
         .manage(Mutex::new(connection));
     let figment = rocket.figment().clone()
-        .merge((Config::PORT, 80))
-        .merge((Config::ADDRESS, "0.0.0.0"));
+        .merge((Config::PORT, 6969));
+        //.merge((Config::ADDRESS, "0.0.0.0"));
     rocket.configure(figment)
         .mount("/", routes![assign, update_layer, update_layer_and_leaderboard, finish_layer, leaderboard, add_to_leaderboard])
 }
