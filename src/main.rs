@@ -191,18 +191,19 @@ fn update_layer_and_leaderboard(state: &State<Mutex<Connection>>, layer: i64, de
 
 #[put("/finish/<user>")]
 fn finish_layer(state: &State<Mutex<Connection>>, user: &str) -> Result<(), SqlError> {
-    let delete = "DELETE FROM assignments WHERE username = ?";
+    let delete = "DELETE FROM assignments WHERE username = :user";
     let set_finished = indoc!{"
         UPDATE layers
         SET finished = 1
         FROM assignments
-        WHERE layers.layer = assignments.layer AND assignments.username = ?
+        WHERE layers.layer = assignments.layer AND assignments.username = :user
     "};
     let mut con = state.lock().unwrap();
     let tx = con.transaction()?;
     for query in [set_finished, delete] {
-        tx.execute(query, params![user]).map(|_| ())?
+        tx.execute(query, named_params!{":user": user}).map(|_| ())?
     }
+    tx.commit()?;
     Ok(())
 }
 
