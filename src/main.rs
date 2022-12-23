@@ -55,7 +55,7 @@ fn choose_existing_assignment(con: &Connection, user: &str, is_even: bool) -> ru
         SELECT username,assignments.layer
         FROM assignments
         JOIN layers ON assignments.layer = layers.layer AND layers.finished = 0 -- only if the layer is unfinished
-        WHERE (username = :user OR UNIXEPOCH() - last_update > 43200) -- 12 hours
+        WHERE (username = :user OR UNIXEPOCH() - last_update > 86400) -- 24 hours
         AND assignments.layer % 2 = :parity
         ORDER BY IIF(username = :user, 0, 1) -- us first
         LIMIT 1
