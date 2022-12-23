@@ -20,10 +20,10 @@ pub fn apply_schema(con: &Connection) {
 
         CREATE TABLE IF NOT EXISTS min_layer (
             id INTEGER PRIMARY KEY CHECK (id = 0), -- only 1 row
-            even INTEGER NOT NULL,
-            odd INTEGER NOT NULL
+            even INTEGER NOT NULL CHECK (even % 2 = 0),
+            odd INTEGER NOT NULL CHECK (odd % 2 = 1)
         );
-        INSERT OR IGNORE INTO min_layer(id,even,odd) VALUES(0, 0, 0);
+        INSERT OR IGNORE INTO min_layer(id,even,odd) VALUES(0, 0, 1);
 
         CREATE TABLE IF NOT EXISTS leaderboard (
             username TEXT PRIMARY KEY,
