@@ -3,13 +3,15 @@ mod schema;
 #[macro_use]
 extern crate rocket;
 
-use rocket::{Config, State};
+use rocket::{Config, Request, State};
 use rocket::serde::{Serialize, json::Json};
 // 1.3.1
 use std::sync::Mutex;
 use rocket::response::Responder;
 use rusqlite::{Connection, named_params, OptionalExtension, params, Transaction};
 use indoc::indoc;
+use rocket::http::Status;
+use rocket::request::{FromRequest, Outcome};
 
 fn next_layer(con: &Connection, is_even: bool) -> rusqlite::Result<i64> {
     // min is the default value and the value used to for odd/even
@@ -134,9 +136,29 @@ impl<T> ToSerializableSqlError<T> for Result<T, rusqlite::Error> {
     }
 }
 
+
+struct ApiKey();
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for ApiKey {
+    type Error = &'static str;
+
+    async fn from_request(req: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        #[cfg(debug_assertions)]
+        return Outcome::Success(ApiKey());
+
+        // if this specific string is not in the request headers, pretend the api doesn't exist
+        match req.headers().get_one("bep-api-key") {
+            None => Outcome::Failure((Status::NotFound, "missing api key")),
+            Some("48a24e8304a49471404bd036ed7e814bdd59d902d51a47a4bcb090e2fb284f70") => Outcome::Success(ApiKey()),
+            Some(_) => Outcome::Failure((Status::NotFound, "wrong api key")),
+        }
+    }
+}
+
 // restart means this user has just finished a layer
 #[put("/assign/<user>/<even_or_odd>")]
-fn assign(state: &State<Mutex<Connection>>, user: &str, even_or_odd: &str) -> Result<Option<String>, SqlError> {
+fn assign(_key: ApiKey, state: &State<Mutex<Connection>>, user: &str, even_or_odd: &str) -> Result<Option<String>, SqlError> {
     let is_even = match even_or_odd {
         "even" => true,
         "odd" => false,
@@ -173,14 +195,14 @@ fn assign(state: &State<Mutex<Connection>>, user: &str, even_or_odd: &str) -> Re
 }
 
 #[patch("/update/<layer>/<depth>")]
-fn update_layer(state: &State<Mutex<Connection>>, layer: i64, depth: i64) -> Result<(), SqlError> {
+fn update_layer(_key: ApiKey, state: &State<Mutex<Connection>>, layer: i64, depth: i64) -> Result<(), SqlError> {
     let con = state.lock().unwrap();
     add_to_layer_depth(&con, layer, depth).with_msg("add_to_layer_depth")
 }
 
 // combined leaderboard/update endpoint because otherwise they would both always be called at the same time separately
 #[patch("/update/<layer>/<depth>/<user>/<blocks>")]
-fn update_layer_and_leaderboard(state: &State<Mutex<Connection>>, layer: i64, depth: i64, user: &str, blocks: i64) -> Result<(), SqlError> {
+fn update_layer_and_leaderboard(_key: ApiKey, state: &State<Mutex<Connection>>, layer: i64, depth: i64, user: &str, blocks: i64) -> Result<(), SqlError> {
     let mut con = state.lock().unwrap();
     let tx = con.transaction()?;
     add_to_layer_depth(&tx, layer, depth).with_msg("add_to_layer_depth")?;
@@ -190,7 +212,7 @@ fn update_layer_and_leaderboard(state: &State<Mutex<Connection>>, layer: i64, de
 }
 
 #[put("/finish/<layer>")]
-fn finish_layer(state: &State<Mutex<Connection>>, layer: i64) -> Result<(), SqlError> {
+fn finish_layer(_key: ApiKey, state: &State<Mutex<Connection>>, layer: i64) -> Result<(), SqlError> {
     let delete = "DELETE FROM assignments WHERE layer = ?";
     let set_finished = "UPDATE layers SET finished = 1 WHERE layer = ?";
     let mut con = state.lock().unwrap();
@@ -203,7 +225,7 @@ fn finish_layer(state: &State<Mutex<Connection>>, layer: i64) -> Result<(), SqlE
 }
 
 #[patch("/leaderboard/<user>/<value>")]
-fn add_to_leaderboard(state: &State<Mutex<Connection>>, user: &str, value: i64) -> Result<(), SqlError> {
+fn add_to_leaderboard(_key: ApiKey, state: &State<Mutex<Connection>>, user: &str, value: i64) -> Result<(), SqlError> {
     let con = state.lock().unwrap();
     update_leaderboard(&con, user, value).to_http()
 }
@@ -216,7 +238,7 @@ struct LeaderboardEntry {
 }
 
 #[get("/leaderboard")]
-fn leaderboard(state: &State<Mutex<Connection>>) -> Result<Json<Vec<LeaderboardEntry>>, SqlError> {
+fn leaderboard(_key: ApiKey, state: &State<Mutex<Connection>>) -> Result<Json<Vec<LeaderboardEntry>>, SqlError> {
     let query = "SELECT username, blocks_mined FROM leaderboard ORDER BY blocks_mined DESC";
     let con = state.lock().unwrap();
     let mut statement = con.prepare(query)?;
