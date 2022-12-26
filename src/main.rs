@@ -186,6 +186,7 @@ fn assign(_key: ApiKey, state: &State<Mutex<Connection>>, user: &str, even_or_od
         first_line.push_str(".failed");
     }
     trimmed.push_str(first_line.as_str());
+    trimmed.push('\n');
     lines.skip(depth.unwrap_or(0) as usize).for_each(|l| {
         trimmed.push_str(l);
         trimmed.push('\n')
@@ -194,14 +195,14 @@ fn assign(_key: ApiKey, state: &State<Mutex<Connection>>, user: &str, even_or_od
     Ok(Some(trimmed))
 }
 
-#[patch("/update/<layer>/<depth>")]
+#[post("/update/<layer>/<depth>")]
 fn update_layer(_key: ApiKey, state: &State<Mutex<Connection>>, layer: i64, depth: i64) -> Result<(), SqlError> {
     let con = state.lock().unwrap();
     add_to_layer_depth(&con, layer, depth).with_msg("add_to_layer_depth")
 }
 
 // combined leaderboard/update endpoint because otherwise they would both always be called at the same time separately
-#[patch("/update/<layer>/<depth>/<user>/<blocks>")]
+#[post("/update/<layer>/<depth>/<user>/<blocks>")]
 fn update_layer_and_leaderboard(_key: ApiKey, state: &State<Mutex<Connection>>, layer: i64, depth: i64, user: &str, blocks: i64) -> Result<(), SqlError> {
     let mut con = state.lock().unwrap();
     let tx = con.transaction()?;
@@ -224,7 +225,7 @@ fn finish_layer(_key: ApiKey, state: &State<Mutex<Connection>>, layer: i64) -> R
     Ok(())
 }
 
-#[patch("/leaderboard/<user>/<value>")]
+#[post("/leaderboard/<user>/<value>")]
 fn add_to_leaderboard(_key: ApiKey, state: &State<Mutex<Connection>>, user: &str, value: i64) -> Result<(), SqlError> {
     let con = state.lock().unwrap();
     update_leaderboard(&con, user, value).to_http()
@@ -266,8 +267,11 @@ fn rocket() -> _ {
     let rocket = rocket::build()
         .manage(Mutex::new(connection));
     let figment = rocket.figment().clone()
-        .merge((Config::PORT, 6969));
+        //.merge((Config::PORT, 80))
         //.merge((Config::ADDRESS, "0.0.0.0"));
+        .merge((Config::PORT, 6969))
+        .merge((Config::ADDRESS, "127.0.0.1"));
+
     rocket.configure(figment)
         .mount("/", routes![assign, update_layer, update_layer_and_leaderboard, finish_layer, leaderboard, add_to_leaderboard])
 }
