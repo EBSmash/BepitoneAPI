@@ -182,7 +182,7 @@ fn assign(_key: ApiKey, state: &State<Mutex<Connection>>, user: &str, even_or_od
     trimmed.push_str(first_line); trimmed.push('\n');
 
     // if we don't know the state of this layer, or the previous owner made some progress on it, consider it failed
-    let failed = depth.is_none() || (depth.unwrap() > 0 && prev_owner == Some(user));
+    let failed = depth.is_none() || (depth.unwrap() > 0 && prev_owner != Some(user));
     trimmed.push_str(format!("failed={}\n", failed).as_str());
     trimmed.push_str(format!("depth={}\n", depth.unwrap_or(0)).as_str());
 
