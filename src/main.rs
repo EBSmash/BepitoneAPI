@@ -71,10 +71,8 @@ fn choose_existing_assignment(con: &Connection, user: &str, is_even: bool) -> ru
     ).optional()
 }
 
-// because we send truncated layer data, the client doesn't know the absolute depth it's mining at so we need to work in relative terms
-// (I don't think this is ideal)
-fn add_to_layer_depth(con: &Connection, layer: i64, depth: i64) -> rusqlite::Result<()> {
-    let changed = con.execute("UPDATE layers SET depth_mined = depth_mined + :depth WHERE layer = :layer", named_params! {
+fn set_layer_depth(con: &Connection, layer: i64, depth: i64) -> rusqlite::Result<()> {
+    let changed = con.execute("UPDATE layers SET depth_mined = :depth WHERE layer = :layer", named_params! {
         ":depth": depth,
         ":layer": layer
     })?;
@@ -177,16 +175,17 @@ fn assign(_key: ApiKey, state: &State<Mutex<Connection>>, user: &str, even_or_od
     let (depth, data) = get_layer_data(&tx, layer).with_msg("No layer data")?;
     tx.commit()?;
 
-    let mut trimmed = String::with_capacity(data.len());
     let mut lines = data.lines();
-    let mut first_line = lines.next().unwrap().to_string();
+    let first_line = lines.next().unwrap();
+
+    let mut trimmed = String::with_capacity(data.len());
+    trimmed.push_str(first_line); trimmed.push('\n');
 
     // if we don't know the state of this layer, or the previous owner made some progress on it, consider it failed
-    if depth.is_none() || (depth.unwrap() > 0 && prev_owner == Some(user)) {
-        first_line.push_str(".failed");
-    }
-    trimmed.push_str(first_line.as_str());
-    trimmed.push('\n');
+    let failed = depth.is_none() || (depth.unwrap() > 0 && prev_owner == Some(user));
+    trimmed.push_str(format!("failed={}\n", failed).as_str());
+    trimmed.push_str(format!("depth={}\n", depth.unwrap_or(0)).as_str());
+
     lines.skip(depth.unwrap_or(0) as usize).for_each(|l| {
         trimmed.push_str(l);
         trimmed.push('\n')
@@ -198,7 +197,7 @@ fn assign(_key: ApiKey, state: &State<Mutex<Connection>>, user: &str, even_or_od
 #[post("/update/<layer>/<depth>")]
 fn update_layer(_key: ApiKey, state: &State<Mutex<Connection>>, layer: i64, depth: i64) -> Result<(), SqlError> {
     let con = state.lock().unwrap();
-    add_to_layer_depth(&con, layer, depth).with_msg("add_to_layer_depth")
+    set_layer_depth(&con, layer, depth).with_msg("set_layer_depth")
 }
 
 // combined leaderboard/update endpoint because otherwise they would both always be called at the same time separately
@@ -206,7 +205,7 @@ fn update_layer(_key: ApiKey, state: &State<Mutex<Connection>>, layer: i64, dept
 fn update_layer_and_leaderboard(_key: ApiKey, state: &State<Mutex<Connection>>, layer: i64, depth: i64, user: &str, blocks: i64) -> Result<(), SqlError> {
     let mut con = state.lock().unwrap();
     let tx = con.transaction()?;
-    add_to_layer_depth(&tx, layer, depth).with_msg("add_to_layer_depth")?;
+    set_layer_depth(&tx, layer, depth).with_msg("set_layer_depth")?;
     update_assignment(&tx, user).with_msg("update_assignment")?;
     update_leaderboard(&tx, user, blocks).with_msg("update_leaderboard")?;
     tx.commit().to_http()
@@ -266,11 +265,20 @@ fn rocket() -> _ {
 
     let rocket = rocket::build()
         .manage(Mutex::new(connection));
-    let figment = rocket.figment().clone()
-        //.merge((Config::PORT, 80))
-        //.merge((Config::ADDRESS, "0.0.0.0"));
-        .merge((Config::PORT, 6969))
-        .merge((Config::ADDRESS, "127.0.0.1"));
+    let mut figment = rocket.figment().clone();
+    #[cfg(debug_assertions)]
+    let debug = true;
+    #[cfg(not(debug_assertions))]
+    let debug = false;
+    if debug {
+        figment = figment
+            .merge((Config::PORT, 6969))
+            .merge((Config::ADDRESS, "127.0.0.1"));
+    } else {
+        figment = figment
+            .merge((Config::PORT, 80))
+            .merge((Config::ADDRESS, "0.0.0.0"));
+    }
 
     rocket.configure(figment)
         .mount("/", routes![assign, update_layer, update_layer_and_leaderboard, finish_layer, leaderboard, add_to_leaderboard])

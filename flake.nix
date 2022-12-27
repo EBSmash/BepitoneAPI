@@ -33,6 +33,9 @@
                 Restart = "always";
               };
             };
+            environment.systemPackages = with pkgs; [
+              sqlite-interactive
+            ];
         })
       ];
       inherit pkgs;
