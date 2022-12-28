@@ -154,6 +154,12 @@ impl<'r> FromRequest<'r> for ApiKey {
     }
 }
 
+#[put("/insert_layer/<layer>/<finished>?<depth>")]
+fn insert_layer(_key: ApiKey, state: &State<Mutex<Connection>>, layer: i64, depth: Option<i64>, finished: bool) -> Result<(), SqlError> {
+    let db = state.lock().unwrap();
+    db.execute("INSERT OR REPLACE INTO layers VALUES (?, ?, ?)", params![layer, depth, finished]).map(|_| ()).to_http()
+}
+
 // restart means this user has just finished a layer
 #[put("/assign/<user>/<even_or_odd>")]
 fn assign(_key: ApiKey, state: &State<Mutex<Connection>>, user: &str, even_or_odd: &str) -> Result<Option<String>, SqlError> {
@@ -281,5 +287,5 @@ fn rocket() -> _ {
     }
 
     rocket.configure(figment)
-        .mount("/", routes![assign, update_layer, update_layer_and_leaderboard, finish_layer, leaderboard, add_to_leaderboard])
+        .mount("/", routes![assign, update_layer, update_layer_and_leaderboard, finish_layer, leaderboard, add_to_leaderboard, insert_layer])
 }
