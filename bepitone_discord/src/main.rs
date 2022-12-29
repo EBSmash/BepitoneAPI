@@ -70,7 +70,9 @@ async fn leaderboard(ctx: &Context, msg: &Message) -> CommandResult {
                 let sum: i64 = parsed.iter().map(|e| e.blocks_mined).sum();
                 e.description(format!("{sum} blocks mined in total"));
                 for LeaderboardEntry { username, blocks_mined} in parsed {
-                    e.field(username, blocks_mined, false);
+                    if blocks_mined > 0 {
+                        e.field(username, blocks_mined, false);
+                    }
                 }
                 e
             })
