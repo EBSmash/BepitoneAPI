@@ -12,8 +12,9 @@
       pname = "bepitone_api";
       version = "1.0.0";
       src = ./.;
+      cargoBuildFlags = [ "--workspace" ];
 
-      cargoHash = "sha256-5fYoJIf6Yre2NjRApUO3yMFfNhbW5Xu/u1NwJ7OgcrQ=";
+      cargoHash = "sha256-8c24euqoyljUnr8/bfVHCLCWCufdNXUXSdYwN8+Qtu0=";
     };
   in {
     nixosConfigurations.bepitone = nixpkgs.lib.nixosSystem {
@@ -30,9 +31,20 @@
 
               serviceConfig = {
                 ExecStart = "${bepitone_api}/bin/bepitone_api";
-                Restart = "always";
+                Restart = "on-failure";
               };
             };
+            systemd.services.bepitone_discord = {
+              description = "bep discord bot";
+              wantedBy = [ "multi-user.target" ];
+              restartIfChanged = true;
+
+              serviceConfig = {
+                ExecStart = "${bepitone_api}/bin/bepitone_discord";
+                Restart = "on-failure";
+              };
+            };
+
             environment.systemPackages = with pkgs; [
               sqlite-interactive
             ];
@@ -51,5 +63,6 @@
       };
     };
 
+    packages.x86_64-linux.bepitone_api = bepitone_api;
   };
 }
