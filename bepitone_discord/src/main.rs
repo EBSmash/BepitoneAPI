@@ -57,7 +57,7 @@ async fn leaderboard(ctx: &Context, msg: &Message) -> CommandResult {
         let vec = buf.to_vec();
         let parsed: Vec<LeaderboardEntry> = serde_json::from_slice(&vec)?;
         let channel = msg.channel_id;
-        if ![1049092193681420338, 1048030014840516701].contains(&channel.as_u64()) {
+        if ![1049092193681420338, 1048030014840516701, 1041084548399771709].contains(&channel.as_u64()) {
             return Ok(())
         }
         channel.send_message(&ctx.http, |m| {
