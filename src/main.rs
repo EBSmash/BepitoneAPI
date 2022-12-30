@@ -263,6 +263,21 @@ fn leaderboard(_key: ApiKey, state: &State<Mutex<Connection>>) -> Result<Json<Ve
     return Ok(Json(entries));
 }
 
+#[get("/active_users")]
+fn active_users(_key: ApiKey, state: &State<Mutex<Connection>>) -> Result<String, SqlError> {
+    let query = "SELECT username FROM assignments WHERE UNIXEPOCH() - last_update < 180 ORDER BY layer DESC";
+    let con = state.lock().unwrap();
+    let mut stmnt = con.prepare(query)?;
+    let rows = stmnt.query_map([], |row| Ok(row.get(0)?))?;
+    let mut out = String::new();
+    for row in rows {
+        let line: Box<str> = row?;
+        out.push_str(line.as_ref());
+        out.push('\n');
+    }
+    Ok(out)
+}
+
 #[launch]
 fn rocket() -> _ {
     let connection = Connection::open("bepitone.db").expect("Failed to open sqlite database (bepitone.db)");
@@ -287,5 +302,5 @@ fn rocket() -> _ {
     }
 
     rocket.configure(figment)
-        .mount("/", routes![assign, update_layer, update_layer_and_leaderboard, finish_layer, leaderboard, add_to_leaderboard, insert_layer])
+        .mount("/", routes![assign, update_layer, update_layer_and_leaderboard, finish_layer, leaderboard, add_to_leaderboard, active_users, insert_layer])
 }

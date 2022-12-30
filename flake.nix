@@ -47,6 +47,7 @@
 
             environment.systemPackages = with pkgs; [
               sqlite-interactive
+              cloud-utils
             ];
         })
       ];
