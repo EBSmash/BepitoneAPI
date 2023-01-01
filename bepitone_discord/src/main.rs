@@ -4,9 +4,8 @@ use std::time::Duration;
 
 use serenity::async_trait;
 use serenity::prelude::*;
-use serenity::model::channel::{Message};
-use serenity::framework::standard::macros::{command, group};
-use serenity::framework::standard::{StandardFramework, CommandResult};
+use serenity::framework::standard::macros::{group};
+use serenity::framework::standard::{StandardFramework};
 use hyper::{Body, Request};
 use serde::{Deserialize};
 use serenity::builder::{EditMessage};

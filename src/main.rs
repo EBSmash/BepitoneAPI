@@ -71,6 +71,15 @@ fn choose_existing_assignment(con: &Connection, user: &str, is_even: bool) -> ru
     ).optional()
 }
 
+fn get_failed_layer(con: &Connection, is_even: bool) -> rusqlite::Result<Option<i64>> {
+    let query = indoc!{"
+        WITH min_config AS (SELECT (CASE WHEN :parity = 0 then even else odd END) as min FROM min_layer)
+        SELECT layer FROM layers WHERE depth_mined IS NULL AND (layer % 2 = ?) AND layer >= (SELECT min FROM min_config) AND finished = 0 LIMIT 1
+    "};
+    let parity = if is_even { 0 } else { 1 };
+    con.query_row(query, named_params! {":parity": parity}, |row| row.get(0)).optional()
+}
+
 fn set_layer_depth(con: &Connection, layer: i64, depth: i64) -> rusqlite::Result<()> {
     let changed = con.execute("UPDATE layers SET depth_mined = :depth WHERE layer = :layer", named_params! {
         ":depth": depth,
@@ -160,7 +169,6 @@ fn insert_layer(_key: ApiKey, state: &State<Mutex<Connection>>, layer: i64, dept
     db.execute("INSERT OR REPLACE INTO layers VALUES (?, ?, ?)", params![layer, depth, finished]).map(|_| ()).to_http()
 }
 
-// restart means this user has just finished a layer
 #[put("/assign/<user>/<even_or_odd>")]
 fn assign(_key: ApiKey, state: &State<Mutex<Connection>>, user: &str, even_or_odd: &str) -> Result<Option<String>, SqlError> {
     let is_even = match even_or_odd {
@@ -173,10 +181,17 @@ fn assign(_key: ApiKey, state: &State<Mutex<Connection>>, user: &str, even_or_od
     let tx = con.transaction()?;
 
     let existing = choose_existing_assignment(&tx, user, is_even)?;
-    let (prev_owner, layer) = match &existing {
-        Some((owner, layer)) => (Some(owner.as_str()), *layer),
-        None => (None, next_layer(&tx, is_even)?)
+
+    let layer = if matches!(&existing, Some((owner, _)) if owner == user) {
+        existing.unwrap().1
+    } else if let Some(failed) = get_failed_layer(&tx, is_even)? {
+        failed
+    } else if let Some((_, layer)) = &existing {
+        *layer
+    } else {
+        next_layer(&tx, is_even)?
     };
+
     assign_to_layer(&tx, user, layer)?;
     let (depth, data) = get_layer_data(&tx, layer).with_msg("No layer data")?;
     tx.commit()?;
@@ -187,9 +202,8 @@ fn assign(_key: ApiKey, state: &State<Mutex<Connection>>, user: &str, even_or_od
     let mut trimmed = String::with_capacity(data.len());
     trimmed.push_str(first_line); trimmed.push('\n');
 
-    // if we don't know the state of this layer, or the previous owner made some progress on it, consider it failed
-    let failed = depth.is_none() || (depth.unwrap() > 0 && prev_owner != Some(user));
-    trimmed.push_str(format!("failed={}\n", failed).as_str());
+    // if we don't know the state of this layer, consider it failed
+    trimmed.push_str(format!("failed={}\n", depth.is_none()).as_str());
     trimmed.push_str(format!("depth={}\n", depth.unwrap_or(0)).as_str());
 
     lines.skip(depth.unwrap_or(0) as usize).for_each(|l| {
