@@ -47,7 +47,7 @@ async fn main() {
     let http = client.cache_and_http.http.clone();
 
     thread::scope(|s| {
-        s.spawn(|| {
+        let handle = s.spawn(|| {
             let layer_data = get_partition_data().unwrap();
             loop {
                 match read_progress_from_db() {
@@ -67,7 +67,8 @@ async fn main() {
                 thread::sleep(Duration::from_secs(60 * 5));
             }
         });
-        s.spawn(|| loop {
+
+        loop {
             match block_on(query_leaderboard()) {
                 Ok(leaderboard) => {
                     if let Err(e) = block_on(leaderboard_channel.edit_message(&http, leaderboard_msg, |m| {
@@ -93,7 +94,7 @@ async fn main() {
             }
 
             thread::sleep(Duration::from_secs(10));
-        });
+        };
     });
 }
 
