@@ -192,13 +192,13 @@ fn render((layers, max_z): &(Vec<(i32, Vec<(u8, i32)>)>, i32), progress: &HashMa
 
     let mut pixels = vec![[0xFF, 0xFF, 0xFF, 0xFF]; (width * height) as usize];
     for (layer, rows) in layers {
-        let skip = match progress.get(&(*layer as i64)) {
-            Some((false, depth)) => rows.len() - *depth as usize,
-            Some((true, _)) => 0usize,
-            None => rows.len()
+        let limit = match progress.get(&(*layer as i64)) {
+            Some((false, depth)) => *depth as usize,
+            Some((true, _)) => rows.len(),
+            None => 0usize
         };
 
-        for (bits, z) in rows.iter().skip(skip) {
+        for (bits, z) in rows.iter().take(limit) {
             for i in 0..5 {
                 if ((bits >> i) & 1) != 0 {
                     let x = ((layer - min_layer) * 5) + i;
