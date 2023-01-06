@@ -15,8 +15,9 @@ use serenity::model::id::MessageId;
 use serenity::model::prelude::ChannelId;
 use serenity::model::Timestamp;
 use serenity::utils::{Colour};
-use futures::executor::block_on;
 use serenity::model::channel::AttachmentType;
+use tokio::{spawn, task, task::spawn_local, time::interval};
+use tokio::task::spawn_blocking;
 
 #[group]
 struct General;
@@ -46,56 +47,69 @@ async fn main() {
     let progress_image_msg = MessageId(1060864851792105482);
     let http = client.cache_and_http.http.clone();
 
-    thread::scope(|s| {
-        let handle = s.spawn(|| {
-            let layer_data = get_partition_data().unwrap();
+    let render_task = {
+        let layer_data = get_partition_data().unwrap();
+        let http = http.clone();
+        async move {
+            let mut interval = interval(Duration::from_secs(60 * 5));
             loop {
+                interval.tick().await;
                 match read_progress_from_db() {
                     Ok(progress) => {
                         let pixels = render(&layer_data, &progress);
                         let png = create_png(&pixels);
-                        if let Err(e) = block_on(leaderboard_channel.edit_message(&http, progress_image_msg, |m| {
+                        if let Err(e) = leaderboard_channel.edit_message(&http, progress_image_msg, |m| {
                             m.content("");
                             m.attachment(AttachmentType::from((png.as_slice(), "progress.png")));
                             m
-                        })) {
+                        }).await {
                             println!("Error trying to edit progress {}", e);
                         }
                     },
                     Err(e) => println!("Error getting progress from db ({})", e)
                 }
-                thread::sleep(Duration::from_secs(60 * 5));
             }
-        });
+        }
+    };
 
-        loop {
-            match block_on(query_leaderboard()) {
-                Ok(leaderboard) => {
-                    if let Err(e) = block_on(leaderboard_channel.edit_message(&http, leaderboard_msg, |m| {
-                        set_leaderboard_data(m, &leaderboard);
-                        m
-                    })) {
-                        println!("Error trying to edit leaderboard {}", e);
-                    }
-                },
-                Err(e) => println!("Error querying API {}", e)
+    let leaderboard_task = {
+        let http = http.clone();
+        async move {
+            let mut interval = interval(Duration::from_secs(10));
+            loop {
+                interval.tick().await;
+                match query_leaderboard().await {
+                    Ok(leaderboard) => {
+                        if let Err(e) = leaderboard_channel.edit_message(&http, leaderboard_msg, |m| {
+                            set_leaderboard_data(m, &leaderboard);
+                            m
+                        }).await {
+                            println!("Error trying to edit leaderboard {}", e);
+                        }
+                    },
+                    Err(e) => println!("Error querying API {}", e)
+                };
+
+                match query_active().await {
+                    Ok(active) => {
+                        if let Err(e) = leaderboard_channel.edit_message(&http, active_users_msg, |m| {
+                            set_active_users_embed(m, active.as_str());
+                            m
+                        }).await {
+                            println!("Error trying to edit active_users {}", e)
+                        }
+                    },
+                    Err(e) => println!("Error querying API {}", e)
+                }
             };
-
-            match block_on(query_active()) {
-                Ok(active) => {
-                    if let Err(e) = block_on(leaderboard_channel.edit_message(&http, active_users_msg, |m| {
-                        set_active_users_embed(m, active.as_str());
-                        m
-                    })) {
-                        println!("Error trying to edit active_users {}", e)
-                    }
-                },
-                Err(e) => println!("Error querying API {}", e)
-            }
-
-            thread::sleep(Duration::from_secs(10));
-        };
-    });
+        }
+    };
+    spawn(render_task);
+    let local = task::LocalSet::new();
+    // some cringe shit about dyn Error not being Send
+    local.run_until(async move {
+        spawn_local(leaderboard_task).await.unwrap();
+    }).await;
 }
 
 #[derive(Deserialize)]
