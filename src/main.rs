@@ -74,7 +74,13 @@ fn choose_existing_assignment(con: &Connection, user: &str, is_even: bool) -> ru
 fn get_failed_layer(con: &Connection, is_even: bool) -> rusqlite::Result<Option<i64>> {
     let query = indoc!{"
         WITH min_config AS (SELECT (CASE WHEN :parity = 0 then even else odd END) as min FROM min_layer)
-        SELECT layer FROM layers WHERE depth_mined IS NULL AND (layer % 2 = :parity) AND layer >= (SELECT min FROM min_config) AND finished = 0 LIMIT 1
+        SELECT layer FROM layers
+        WHERE depth_mined IS NULL
+              AND (layer % 2 = :parity)
+              AND layer >= (SELECT min FROM min_config)
+              AND finished = 0
+              AND layer NOT IN (SELECT layer from assignments)
+        LIMIT 1
     "};
     let parity = if is_even { 0 } else { 1 };
     con.query_row(query, named_params! {":parity": parity}, |row| row.get(0)).optional()
