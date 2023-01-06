@@ -14,7 +14,7 @@
       src = ./.;
       cargoBuildFlags = [ "--workspace" ];
 
-      cargoHash = "sha256-8c24euqoyljUnr8/bfVHCLCWCufdNXUXSdYwN8+Qtu0=";
+      cargoHash = "sha256-9t4VKMPbq0l7vk2Ku4JNb9GoVSYR6K2XgimGgCCoh+E=";
     };
   in {
     nixosConfigurations.bepitone = nixpkgs.lib.nixosSystem {
