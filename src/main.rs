@@ -265,7 +265,11 @@ struct LeaderboardEntry {
 
 #[get("/leaderboard")]
 fn leaderboard(_key: ApiKey, state: &State<Mutex<Connection>>) -> Result<Json<Vec<LeaderboardEntry>>, SqlError> {
-    let query = "SELECT username, blocks_mined FROM leaderboard ORDER BY blocks_mined DESC";
+    let query = indoc!{"
+        SELECT COALESCE((SELECT name FROM leaderboard_aliases WHERE account = username), username) AS name, SUM(blocks_mined) FROM leaderboard
+        GROUP BY name
+        ORDER BY SUM(blocks_mined) DESC
+    "};
     let con = state.lock().unwrap();
     let mut statement = con.prepare(query)?;
 

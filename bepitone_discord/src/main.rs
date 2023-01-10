@@ -1,4 +1,4 @@
-use std::{env, thread};
+use std::env;
 use std::collections::HashMap;
 use std::error::Error;
 use std::time::Duration;
@@ -7,17 +7,16 @@ use serenity::async_trait;
 use serenity::prelude::*;
 use serenity::framework::standard::macros::{group};
 use serenity::framework::standard::{StandardFramework};
-use hyper::{Body, Request};
-use rusqlite::Connection;
-use serde::{Deserialize};
 use serenity::builder::{EditMessage};
 use serenity::model::id::MessageId;
 use serenity::model::prelude::ChannelId;
 use serenity::model::Timestamp;
 use serenity::utils::{Colour};
 use serenity::model::channel::AttachmentType;
+use hyper::{Body, Request};
+use rusqlite::Connection;
+use serde::{Deserialize};
 use tokio::{spawn, task, task::spawn_local, time::interval};
-use tokio::task::spawn_blocking;
 
 #[group]
 struct General;

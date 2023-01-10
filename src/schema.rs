@@ -30,6 +30,10 @@ pub fn apply_schema(con: &Connection) {
             blocks_mined INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS leaderboard_by_blocks ON leaderboard(blocks_mined DESC);
+        CREATE TABLE IF NOT EXISTS leaderboard_aliases (
+            account TEXT PRIMARY KEY,
+            name TEXT NOT NULL
+        );
 
         CREATE TABLE IF NOT EXISTS partitions (
             layer INTEGER PRIMARY KEY,
