@@ -197,11 +197,12 @@ fn render((layers, max_z): &(Vec<(i32, Vec<(u8, i32)>)>, i32), progress: &HashMa
             None => 0usize
         };
 
-        for (bits, z) in rows.iter().take(limit) {
-            for i in 0..5 {
-                if ((bits >> i) & 1) != 0 {
-                    let x = ((layer - min_layer) * 5) + i;
-                    pixels[((z * width) + x) as usize] = [0, 0, 0, 0xFF];
+        for (i, (bits, z)) in rows.iter().enumerate() {
+            for bit in 0..5 {
+                if ((bits >> bit) & 1) != 0 {
+                    let x = ((layer - min_layer) * 5) + bit;
+                    let color = if i < limit { [0, 0, 0, 0xFF] } else { [200, 200, 200, 0xFF] };
+                    pixels[((z * width) + x) as usize] = color;
                 }
             }
         }
