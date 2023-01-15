@@ -17,7 +17,7 @@ fn next_layer(con: &Connection, is_even: bool) -> rusqlite::Result<i64> {
     // min is the default value and the value used to for odd/even
     let query = indoc!{"
         WITH min_config AS (SELECT (CASE WHEN :parity = 0 then even else odd END) as min FROM min_layer)
-        INSERT INTO layers(layer) SELECT COALESCE(MAX(MAX(layer) + 2, (SELECT min FROM min_config)), (SELECT min FROM min_config)) FROM layers WHERE (layer % 2) = :parity
+        INSERT INTO layers(layer) SELECT COALESCE(MAX(MAX(layer) + 2, (SELECT min FROM min_config)), (SELECT min FROM min_config)) FROM layers WHERE (layer % 2) = :parity AND layer < 1280
         RETURNING *;
     "};
     let parity = if is_even { 0 } else { 1 };
@@ -80,6 +80,7 @@ fn get_failed_layer(con: &Connection, is_even: bool) -> rusqlite::Result<Option<
               AND layer >= (SELECT min FROM min_config)
               AND finished = 0
               AND layer NOT IN (SELECT layer from assignments)
+        ORDER BY layer DESC
         LIMIT 1
     "};
     let parity = if is_even { 0 } else { 1 };
