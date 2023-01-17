@@ -83,7 +83,9 @@ fn get_failed_layer(con: &Connection, is_even: bool) -> rusqlite::Result<Option<
         ORDER BY layer DESC
         LIMIT 1
     "};
-    let parity = if is_even { 0 } else { 1 };
+    // this is the opposite of other queries because the parity the client requests will work with normal layers but
+    // failed layers need to be started from the opposite side
+    let parity = if is_even { 1 } else { 0 };
     con.query_row(query, named_params! {":parity": parity}, |row| row.get(0)).optional()
 }
 
