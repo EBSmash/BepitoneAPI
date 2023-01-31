@@ -80,7 +80,7 @@ fn get_failed_layer(con: &Connection, is_even: bool) -> rusqlite::Result<Option<
               AND layer >= (SELECT min FROM min_config)
               AND finished = 0
               AND layer NOT IN (SELECT layer from assignments)
-        ORDER BY layer DESC
+        ORDER BY layer ASC
         LIMIT 1
     "};
     // this is the opposite of other queries because the parity the client requests will work with normal layers but
