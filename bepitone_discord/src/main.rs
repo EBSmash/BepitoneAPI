@@ -146,7 +146,8 @@ async fn query_active() -> Result<String, Box<dyn Error>> {
 
 fn set_active_users_embed(m: &mut EditMessage, data: &str) {
     m.embed(|e| {
-        e.title("Active Miners")
+        let count = data.lines().count();
+        e.title(format!("Active Miners ({count})"))
             .description(data)
             .color(Colour(0xFFFFFF))
             .timestamp(Timestamp::now());
